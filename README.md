@@ -56,6 +56,13 @@ Turn on **Spatial sound from this map** to pan the audio to your speakers by the
 
 Spatial mode changes only what each speaker plays. Delay, gain, level and alignment still apply. All settings are saved in profiles.
 
+## Tabs
+
+- **Routing:** source, mode, outputs (gain, mute, delay, position), profiles and diagnostics.
+- **Speaker setup:** presets, the room map with 7.1 and 8D, and **Calibrate with a microphone**. Put a microphone at your seat, keep the room quiet, and press Calibrate. SyncSound plays clicks through each playing output in turn (about 6 s each) at that output's own gain. It finds when each output reaches the microphone and sets delays so all of them arrive together, with the smallest delay at 0. It needs at least two playing, unmuted outputs; outputs it can't hear clearly keep their delay. On the test setup it set the Realtek speaker to 255 ms behind the Bluetooth iOX 2; the manual measurement was 254 ms.
+- **Apps:** route only the apps you pick (up to 8) instead of all Windows audio. Each app is captured with Windows process loopback, and several apps are mixed on a shared timeline. Apps are remembered by executable name and reconnect when they restart. Windows still plays those apps on their own output, so to hear them only through SyncSound, set the app's output to a device you don't listen to in Windows' Volume mixer.
+- **Equalizer:** per output, low cut (40–150 Hz) for small speakers and bass (100 Hz), mid (1 kHz) and treble (8 kHz), each ±12 dB, with presets and a response curve. Boosts lower the level by the same amount so they can't clip.
+
 ## Requirements (Windows 11 x64)
 
 - Node.js 22 or later and npm

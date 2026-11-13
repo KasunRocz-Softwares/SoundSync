@@ -429,7 +429,7 @@ function App() {
 
       <footer>
         <span>Capture format {snapshot ? `${snapshot.capture_format.sample_rate.toLocaleString()} Hz · ${snapshot.capture_format.channels} ch float` : '—'}</span>
-        <span>Estimated values only · no acoustic calibration in v0.1</span>
+        <span>Card latencies are estimates · use Calibrate for measured alignment</span>
       </footer>
     </main>
   </div>;
