@@ -274,20 +274,34 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationCompletion_Impl
     }
 }
 
-fn process_exclusion_params() -> AUDIOCLIENT_ACTIVATION_PARAMS {
+fn process_loopback_params(pid: u32, include: bool) -> AUDIOCLIENT_ACTIVATION_PARAMS {
     AUDIOCLIENT_ACTIVATION_PARAMS {
         ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
         Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
             ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
-                TargetProcessId: std::process::id(),
-                ProcessLoopbackMode: PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+                TargetProcessId: pid,
+                ProcessLoopbackMode: if include {
+                    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
+                } else {
+                    PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE
+                },
             },
         },
     }
 }
 
+fn process_exclusion_params() -> AUDIOCLIENT_ACTIVATION_PARAMS {
+    process_loopback_params(std::process::id(), false)
+}
+
 fn activate_excluding_self() -> Result<IAudioClient, CaptureError> {
-    let mut params = Box::new(process_exclusion_params());
+    activate_process_loopback(process_exclusion_params())
+}
+
+fn activate_process_loopback(
+    params: AUDIOCLIENT_ACTIVATION_PARAMS,
+) -> Result<IAudioClient, CaptureError> {
+    let mut params = Box::new(params);
     // PROPVARIANT normally frees VT_BLOB with CoTaskMemFree. This blob is borrowed
     // from a Box owned by the completion object; suppress that automatic free.
     let mut variant = ManuallyDrop::new(PROPVARIANT::default());
@@ -355,6 +369,9 @@ impl Session {
                 }
             }
             CaptureTarget::SystemExcludingSelf => activate_excluding_self()?,
+            CaptureTarget::App(pid) => {
+                activate_process_loopback(process_loopback_params(*pid, true))?
+            }
         };
         // Ask the shared audio engine to convert native integer/multichannel mix PCM
         // into the configured float layout. A rejected format fails; never reinterpret it.
@@ -582,6 +599,17 @@ mod tests {
         assert_eq!(
             process.ProcessLoopbackMode,
             PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE
+        );
+    }
+
+    #[test]
+    fn app_capture_includes_only_the_target_process_tree() {
+        let params = process_loopback_params(4242, true);
+        let process = unsafe { params.Anonymous.ProcessLoopbackParams };
+        assert_eq!(process.TargetProcessId, 4242);
+        assert_eq!(
+            process.ProcessLoopbackMode,
+            PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
         );
     }
 

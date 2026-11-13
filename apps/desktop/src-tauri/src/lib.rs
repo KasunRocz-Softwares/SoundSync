@@ -2,6 +2,7 @@
 //! latest engine snapshot before touching the engine; rejected input changes nothing.
 use serde::Serialize;
 use std::path::PathBuf;
+use syncsound_engine::capture::{AudioApp, CaptureSource};
 use syncsound_engine::capture::{AudioEndpoint, CaptureState};
 use syncsound_engine::commands::{
     parse_mode, parse_source, validate_delay, validate_enable, validate_endpoint_id,
@@ -235,6 +236,44 @@ async fn set_spatial(
 }
 
 #[tauri::command]
+async fn list_audio_apps(state: State<'_, AppState>) -> CmdResult<Vec<AudioApp>> {
+    state.engine.list_apps().map_err(engine_error)
+}
+
+/// Route only these applications (executable names, e.g. "Spotify.exe").
+#[tauri::command]
+async fn select_app_sources(exes: Vec<String>, state: State<'_, AppState>) -> CmdResult<()> {
+    if exes.is_empty() || exes.len() > 8 {
+        return Err(CommandError::new(
+            "invalid_apps",
+            "Choose between 1 and 8 apps",
+        ));
+    }
+    for exe in &exes {
+        let valid = (5..=260).contains(&exe.len())
+            && exe.to_ascii_lowercase().ends_with(".exe")
+            && !exe.contains(['\\', '/', ':'])
+            && !exe.chars().any(char::is_control);
+        if !valid {
+            return Err(CommandError::new(
+                "invalid_apps",
+                format!("Not an app name: {exe}"),
+            ));
+        }
+        if exe.eq_ignore_ascii_case("syncsound-desktop.exe") {
+            return Err(CommandError::new(
+                "invalid_apps",
+                "SyncSound cannot route its own audio (that would loop back)",
+            ));
+        }
+    }
+    state
+        .engine
+        .set_source(CaptureSource::Apps(exes))
+        .map_err(engine_error)
+}
+
+#[tauri::command]
 async fn set_device_eq(id: String, eq: EqSettings, state: State<'_, AppState>) -> CmdResult<()> {
     let snapshot = state.engine.snapshot();
     validate_endpoint_id(&id, &snapshot.endpoints)?;
@@ -403,7 +442,9 @@ pub fn run() {
             set_device_spread,
             set_device_subwoofer,
             set_spatial,
-            set_device_eq
+            set_device_eq,
+            list_audio_apps,
+            select_app_sources
         ])
         .build(tauri::generate_context!())
         .expect("error while building SyncSound");

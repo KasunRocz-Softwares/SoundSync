@@ -32,6 +32,8 @@
     "allow-set-device-spread",
     "allow-set-device-subwoofer",
     "allow-set-spatial",
-    "allow-set-device-eq"
+    "allow-set-device-eq",
+    "allow-list-audio-apps",
+    "allow-select-app-sources"
   ]
 }

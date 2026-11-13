@@ -537,6 +537,9 @@ impl RenderPipeline {
                 self.primed = true;
                 self.smoothed_error = 0.0;
                 self.phase = 0.0;
+                // Bursty sources can overshoot the target while priming; settle it once.
+                self.resync_callbacks = RESYNC_WINDOW;
+                self.resync_error_sum = 0.0;
             } else {
                 output.fill(0.0);
                 self.publish_metrics(frames_out, false);

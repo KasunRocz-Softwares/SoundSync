@@ -45,6 +45,24 @@ pub enum CaptureSource {
     /// Explicit opt-in: captures all endpoints except this process and its children.
     /// Windows cannot combine this API with a selected endpoint filter.
     SystemExcludingSelf,
+    /// One application's process tree (process-loopback include mode). `pid` is
+    /// resolved from `exe` by the engine each time capture (re)starts.
+    App {
+        exe: String,
+        pid: u32,
+    },
+    /// Engine-level: several applications, each captured separately and mixed.
+    Apps(Vec<String>),
+}
+
+/// An application with an audio session, offered for per-app routing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct AudioApp {
+    pub exe: String,
+    pub name: String,
+    pub pid: u32,
+    /// Playing right now (vs. an idle session).
+    pub active: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -83,6 +101,7 @@ impl CaptureConfig {
 pub enum CaptureTarget {
     Endpoint(String),
     SystemExcludingSelf,
+    App(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -121,13 +140,21 @@ impl CaptureController {
     pub fn reconcile(&mut self, endpoints: &[AudioEndpoint]) -> Option<CaptureTarget> {
         let target = match &self.config.source {
             CaptureSource::SystemExcludingSelf => CaptureTarget::SystemExcludingSelf,
+            // Capturing only another app can never pick up SyncSound's own output.
+            CaptureSource::App { pid, .. } if *pid != std::process::id() && *pid != 0 => {
+                CaptureTarget::App(*pid)
+            }
+            CaptureSource::App { .. } | CaptureSource::Apps(_) => {
+                self.state = CaptureState::Unavailable { endpoint_id: None };
+                return None;
+            }
             source => {
                 let endpoint = endpoints.iter().find(|endpoint| {
                     endpoint.state == EndpointState::Active
                         && match source {
                             CaptureSource::DefaultRender => endpoint.is_default,
                             CaptureSource::Endpoint(id) => endpoint.id == *id,
-                            CaptureSource::SystemExcludingSelf => false,
+                            _ => false,
                         }
                 });
                 let Some(endpoint) = endpoint else {

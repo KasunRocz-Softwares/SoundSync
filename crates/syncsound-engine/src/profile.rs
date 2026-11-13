@@ -21,6 +21,8 @@ pub enum ProfileSource {
     DefaultRender,
     Endpoint(String),
     SystemExcludingSelf,
+    /// Executable names; pids are resolved when the profile is loaded.
+    Apps(Vec<String>),
 }
 
 impl From<&CaptureSource> for ProfileSource {
@@ -29,6 +31,8 @@ impl From<&CaptureSource> for ProfileSource {
             CaptureSource::DefaultRender => Self::DefaultRender,
             CaptureSource::Endpoint(id) => Self::Endpoint(id.clone()),
             CaptureSource::SystemExcludingSelf => Self::SystemExcludingSelf,
+            CaptureSource::App { exe, .. } => Self::Apps(vec![exe.clone()]),
+            CaptureSource::Apps(exes) => Self::Apps(exes.clone()),
         }
     }
 }
@@ -273,6 +277,7 @@ impl Profile {
                 (Some(CaptureSource::Endpoint(id.clone())), None)
             }
             ProfileSource::Endpoint(id) => (None, Some(id.clone())),
+            ProfileSource::Apps(exes) => (Some(CaptureSource::Apps(exes.clone())), None),
         };
         let mut outputs = Vec::new();
         let mut missing = Vec::new();

@@ -13,6 +13,18 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let engine = AudioEngine::spawn();
     let endpoints = engine.refresh_endpoints().expect("enumerate endpoints");
+    if args.first().map(String::as_str) == Some("apps") {
+        for app in engine.list_apps().expect("list apps") {
+            println!(
+                "{:<28} {:<32} pid {:>6} {}",
+                app.name,
+                app.exe,
+                app.pid,
+                if app.active { "PLAYING" } else { "idle" }
+            );
+        }
+        return;
+    }
     if args.first().map(String::as_str) != Some("route") {
         for e in endpoints
             .iter()
@@ -56,9 +68,12 @@ fn main() {
         !outputs.is_empty(),
         "no active endpoint matched {filters:?}"
     );
-    engine
-        .set_source(CaptureSource::SystemExcludingSelf)
-        .unwrap();
+    match std::env::var("SYNCSOUND_APP") {
+        Ok(app) => engine.set_source(CaptureSource::Apps(vec![app])).unwrap(),
+        Err(_) => engine
+            .set_source(CaptureSource::SystemExcludingSelf)
+            .unwrap(),
+    }
     engine.set_mode(mode).unwrap();
     engine.apply_outputs(outputs).unwrap();
     engine.start().unwrap();

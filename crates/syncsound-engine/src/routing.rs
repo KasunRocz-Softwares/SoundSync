@@ -90,6 +90,14 @@ pub struct OutputStatus {
     pub warning: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppSourceStatus {
+    pub exe: String,
+    /// None = not running / no audio session yet (retried every 3 s).
+    pub pid: Option<u32>,
+    pub capturing: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ErrorRecord {
     pub at_ms: u64,
@@ -107,6 +115,8 @@ pub struct EngineSnapshot {
     pub outputs: Vec<OutputStatus>,
     pub distance_compensation: bool,
     pub spatial: SpatialConfig,
+    /// Per-app routing status (source = Apps).
+    pub app_sources: Vec<AppSourceStatus>,
     pub endpoints: Vec<AudioEndpoint>,
     pub recent_errors: Vec<ErrorRecord>,
     pub updated_at_ms: u64,
@@ -123,6 +133,7 @@ impl EngineSnapshot {
             outputs: Vec::new(),
             distance_compensation: true,
             spatial: SpatialConfig::default(),
+            app_sources: Vec::new(),
             endpoints: Vec::new(),
             recent_errors: Vec::new(),
             updated_at_ms: 0,

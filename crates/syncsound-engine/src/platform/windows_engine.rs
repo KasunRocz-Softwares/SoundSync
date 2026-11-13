@@ -3,15 +3,19 @@
 //! workers, and publishes throttled snapshots. Commands arrive over a channel; the
 //! handle is Send + Sync so Tauri can share it.
 use super::windows::{CaptureError, EndpointCatalog, LoopbackCapture};
+use super::windows_apps::list_audio_apps;
 use super::windows_render::{RenderWorker, WorkerPoll};
+use crate::capture::AudioApp;
 use crate::capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState, EndpointState};
 use crate::eq::{design, EqSettings};
+use crate::mixer::TimelineMixer;
 use crate::output_state::{OutputLifecycle, OutputLifecycleState};
 use crate::placement::{apply_preset, compute_placement, SoundPreset, SpeakerPosition};
 use crate::render::{
     ms_to_frames, AudioMode, ChannelRole, OutputControls, OutputMetrics, RenderPipeline,
     MAX_ENABLED_OUTPUTS,
 };
+use crate::routing::AppSourceStatus;
 use crate::routing::{
     alignment_frames, latency_warning, metrics_ms, EngineSnapshot, ErrorRecord, OutputConfig,
     OutputStatus,
@@ -68,6 +72,7 @@ enum Command {
     SetSubwoofer(String, bool, Reply<()>),
     SetSpatial(SpatialConfig, Reply<()>),
     SetEq(String, EqSettings, Reply<()>),
+    ListApps(Reply<Vec<AudioApp>>),
     ApplyPreset(SoundPreset, Reply<()>),
     Refresh(Reply<Vec<AudioEndpoint>>),
     Shutdown,
@@ -194,6 +199,10 @@ impl AudioEngine {
     pub fn set_subwoofer(&self, id: String, on: bool) -> Result<(), EngineError> {
         self.call(|r| Command::SetSubwoofer(id, on, r))
     }
+    /// Applications that currently have an audio session.
+    pub fn list_apps(&self) -> Result<Vec<AudioApp>, EngineError> {
+        self.call(Command::ListApps)
+    }
     pub fn set_eq(&self, id: String, settings: EqSettings) -> Result<(), EngineError> {
         self.call(|r| Command::SetEq(id, settings, r))
     }
@@ -229,6 +238,13 @@ struct OutputSlot {
     published_eq: Option<EqSettings>,
 }
 
+struct AppCapture {
+    exe: String,
+    pid: u32,
+    capture: LoopbackCapture,
+    consumer: PcmConsumer,
+}
+
 struct Core {
     format: PcmFormat,
     mode: AudioMode,
@@ -240,6 +256,12 @@ struct Core {
     endpoints: Vec<AudioEndpoint>,
     outputs: BTreeMap<String, OutputSlot>,
     capture: Option<(LoopbackCapture, PcmConsumer)>,
+    /// Per-app captures (source = Apps): exe, resolved pid, capture, queue.
+    app_captures: Vec<AppCapture>,
+    unresolved_apps: Vec<String>,
+    mixer: TimelineMixer,
+    mix_out: Vec<f32>,
+    last_app_check: Instant,
     scratch: Vec<f32>,
     errors: VecDeque<ErrorRecord>,
     started: Instant,
@@ -267,6 +289,11 @@ impl Core {
             endpoints,
             outputs: BTreeMap::new(),
             capture: None,
+            app_captures: Vec::new(),
+            unresolved_apps: Vec::new(),
+            mixer: TimelineMixer::new(usize::from(format.channels), 24_000, 960),
+            mix_out: vec![0.0; 480 * usize::from(format.channels)],
+            last_app_check: now,
             scratch: vec![
                 0.0;
                 CaptureConfig::default().max_block_frames * usize::from(format.channels)
@@ -450,6 +477,10 @@ impl Core {
             Command::SetSubwoofer(id, on, reply) => {
                 let _ = reply.send(self.slot(&id).map(|s| s.config.subwoofer = on));
             }
+            Command::ListApps(reply) => {
+                let _ =
+                    reply.send(list_audio_apps().map_err(|e| EngineError::Platform(e.to_string())));
+            }
             Command::SetEq(id, settings, reply) => {
                 let _ = reply.send(self.slot(&id).map(|s| s.config.eq = settings));
             }
@@ -600,10 +631,48 @@ impl Core {
             self.stop_output(&id);
         }
         self.capture = None;
+        self.app_captures.clear();
     }
 
     fn restart_capture(&mut self) {
         self.capture = None;
+        self.app_captures.clear();
+        self.unresolved_apps.clear();
+        self.mixer.reset();
+        if let CaptureSource::Apps(exes) = self.source.clone() {
+            let apps = list_audio_apps().unwrap_or_default();
+            for exe in exes {
+                let Some(app) = apps.iter().find(|a| a.exe.eq_ignore_ascii_case(&exe)) else {
+                    self.unresolved_apps.push(exe);
+                    continue;
+                };
+                let config = CaptureConfig {
+                    source: CaptureSource::App {
+                        exe: exe.clone(),
+                        pid: app.pid,
+                    },
+                    format: self.format,
+                    output_endpoint_ids: self.enabled_ids(),
+                    ..CaptureConfig::default()
+                };
+                match LoopbackCapture::new(config) {
+                    Ok((mut capture, consumer)) => {
+                        if let Err(error) = capture.start() {
+                            self.record("capture", format!("{exe}: {error}"));
+                        }
+                        self.app_captures.push(AppCapture {
+                            exe,
+                            pid: app.pid,
+                            capture,
+                            consumer,
+                        });
+                    }
+                    Err(error) => self.record("capture", format!("{exe}: {error}")),
+                }
+            }
+            self.last_app_check = Instant::now();
+            return;
+        }
         let config = CaptureConfig {
             source: self.source.clone(),
             format: self.format,
@@ -625,6 +694,9 @@ impl Core {
     /// Feedback guard: the capture must know every output BEFORE a render stream opens.
     fn sync_capture_routes(&mut self) {
         let ids = self.enabled_ids();
+        for app in &mut self.app_captures {
+            let _ = app.capture.set_output_endpoints(ids.clone());
+        }
         if let Some((capture, _)) = &mut self.capture {
             if let Err(error) = capture.set_output_endpoints(ids) {
                 let message = error.to_string();
@@ -754,6 +826,7 @@ impl Core {
         if let Some(message) = capture_error {
             self.record("capture", message);
         }
+        self.service_app_captures();
 
         // 2. Supervise workers; one failure never touches other outputs.
         let now = Instant::now();
@@ -808,6 +881,52 @@ impl Core {
             }
         }
         self.publish(false);
+    }
+
+    /// Polls every app capture, mixes them on the shared frame timeline and fans
+    /// the mix out. Every 3 s, re-resolves apps that were missing or restarted.
+    fn service_app_captures(&mut self) {
+        if !matches!(self.source, CaptureSource::Apps(_)) {
+            return;
+        }
+        let ch = usize::from(self.format.channels);
+        let mut errors = Vec::new();
+        for app in &mut self.app_captures {
+            if let Err(error) = app.capture.poll() {
+                errors.push(format!("{}: {error}", app.exe));
+            }
+            while let Ok((first, frames)) = app.consumer.pop_into(&mut self.scratch) {
+                self.mixer.add(first, &self.scratch[..frames * ch]);
+            }
+        }
+        for e in errors {
+            self.record("capture", e);
+        }
+        while let Some(first) = self.mixer.pop(&mut self.mix_out) {
+            for slot in self.outputs.values_mut() {
+                if let Some(producer) = &mut slot.producer {
+                    if producer.push_samples(first, &self.mix_out) == QueueStatus::Full {
+                        slot.metrics.record_overrun();
+                    }
+                }
+            }
+        }
+        if self.last_app_check.elapsed() >= Duration::from_secs(3) {
+            self.last_app_check = Instant::now();
+            let apps = list_audio_apps().unwrap_or_default();
+            let moved = self.app_captures.iter().any(|c| {
+                apps.iter()
+                    .find(|a| a.exe.eq_ignore_ascii_case(&c.exe))
+                    .is_some_and(|a| a.pid != c.pid && a.active)
+            });
+            let appeared = self
+                .unresolved_apps
+                .iter()
+                .any(|exe| apps.iter().any(|a| a.exe.eq_ignore_ascii_case(exe)));
+            if moved || appeared {
+                self.restart_capture();
+            }
+        }
     }
 
     fn display_name(&self, id: &str) -> String {
@@ -874,11 +993,38 @@ impl Core {
                 }
             })
             .collect();
-        let capture_state = self
-            .capture
-            .as_ref()
-            .map(|(c, _)| c.state().clone())
-            .unwrap_or(CaptureState::Stopped);
+        let capture_state = if matches!(self.source, CaptureSource::Apps(_)) && self.running {
+            let capturing = self
+                .app_captures
+                .iter()
+                .find(|a| matches!(a.capture.state(), CaptureState::Capturing(_)));
+            match (capturing, self.app_captures.first()) {
+                (Some(app), _) => app.capture.state().clone(),
+                (None, Some(app)) => app.capture.state().clone(),
+                (None, None) => CaptureState::Unavailable { endpoint_id: None },
+            }
+        } else {
+            self.capture
+                .as_ref()
+                .map(|(c, _)| c.state().clone())
+                .unwrap_or(CaptureState::Stopped)
+        };
+        let app_sources = match &self.source {
+            CaptureSource::Apps(exes) => exes
+                .iter()
+                .map(|exe| {
+                    let capture = self.app_captures.iter().find(|a| &a.exe == exe);
+                    AppSourceStatus {
+                        exe: exe.clone(),
+                        pid: capture.map(|a| a.pid),
+                        capturing: capture.is_some_and(|a| {
+                            matches!(a.capture.state(), CaptureState::Capturing(_))
+                        }),
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
         let snapshot = EngineSnapshot {
             running: self.running,
             mode: self.mode,
@@ -888,6 +1034,7 @@ impl Core {
             outputs,
             distance_compensation: self.distance_compensation,
             spatial: self.spatial_config,
+            app_sources,
             endpoints: self.endpoints.clone(),
             recent_errors: self.errors.iter().cloned().collect(),
             updated_at_ms: self.started.elapsed().as_millis() as u64,

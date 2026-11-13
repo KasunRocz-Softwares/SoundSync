@@ -28,6 +28,8 @@ const COMMANDS: &[&str] = &[
     "set_device_subwoofer",
     "set_spatial",
     "set_device_eq",
+    "list_audio_apps",
+    "select_app_sources",
 ];
 
 fn main() {
