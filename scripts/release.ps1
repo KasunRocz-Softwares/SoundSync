@@ -59,9 +59,12 @@ if ($conf.version -ne $Version) {
 
 if (-not (Test-Path $KeyPath)) { throw "Updater signing key not found at $KeyPath" }
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $KeyPath -Raw
-if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = '' }
+# PowerShell deletes an environment variable set to '', so Tauri can't see an
+# empty password and prompts for one. A key without a password gets an empty
+# line on standard input instead; a key with one uses the variable.
+$keyPassword = "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
 
-& powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-windows.ps1')
+$keyPassword | & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-windows.ps1')
 if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
 
 $setup = Get-Item "target/release/bundle/nsis/SyncSound_${Version}_x64-setup.exe"
