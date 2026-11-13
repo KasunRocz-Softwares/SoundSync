@@ -23,6 +23,26 @@
 2. Turn on the outputs you want, then select **Start routing**.
 3. Use **Delay** to fine-tune by ear. Bluetooth devices usually need extra delay on the *other* outputs.
 
+## Speaker setup
+
+Each enabled output has four placement settings:
+
+- **Position:** front, side or rear, left or right.
+- **Distance:** how far it is from your seat, 0.2–20 m, optional.
+- **Plays:** stereo, stereo with left and right swapped, left only, right only, or a mono mix.
+- **Level:** a trim from 0 to −24 dB.
+
+Presets set what each output plays and its level, and keep your gain, delay and positions:
+
+| Preset | Effect |
+|---|---|
+| Stereo | Every output plays full stereo |
+| Front + Rear | Outputs placed at the rear play 3 dB quieter; at least one must be set to Rear |
+| Left / Right pair | Exactly two outputs form one stereo pair, assigned by their left/right positions |
+| Party mono | Every output plays the same mono mix |
+
+With **Compensate for distance** on, nearer speakers are delayed by 2.9 ms per metre and turned down by inverse distance (never below 25%). That way sound from every speaker reaches your seat together and evenly. If you tuned delays with a microphone at your seat, turn it off, because the measurement already includes distance. All of these settings are saved in profiles.
+
 ## Requirements (Windows 11 x64)
 
 - Node.js 22 or later and npm

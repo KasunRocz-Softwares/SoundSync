@@ -7,7 +7,7 @@ SyncSound v0.1.0, **developer preview**. Host: Windows 11 Pro build 26300, Rust 
 | Command | Result |
 |---|---|
 | `npm ci`, `npm run build` | Passed |
-| `cargo test --workspace` | 66 passed (57 engine unit + 9 portable capture), 4 hardware tests ignored by default |
+| `cargo test --workspace` | 75 passed (66 engine unit + 9 portable capture), 4 hardware tests ignored by default |
 | `cargo check --workspace` | Passed |
 | `npm run desktop:build` | Passed; produced both bundles |
 
@@ -70,6 +70,10 @@ Saved as the profile `Front Realtek Rear iOX 2`: source = Windows default, iOX 2
 - **Gaming warning:** it now excludes manual and alignment delay. Realtek at 254 ms delay no longer shows the warning.
 - **Profile names:** `+ & ( ) ,` are now allowed. Invalid names are flagged inline and Save is disabled; save and load results appear next to the profile controls.
 - **Gaming mode underruns on Bluetooth:** with the 20 ms buffer, the iOX 2 underran about 5 times per second (69 in about 13 s) while Realtek had none. Balanced (40 ms) held the count steady over 15 s. Both outputs get the same +20 ms, so their alignment is unchanged by design, but this was **not re-measured** acoustically.
+
+### Speaker setup applied (installed build)
+
+Front = Realtek (Stereo, 0 dB, delay 254 ms). Rear = iOX 2 (Stereo, Front + Rear preset −3 dB; the app showed "71% level"). Distance compensation is off because the delay was measured at the seat. Mode Synchronized and gains of 30% and 33% were kept from the user's saved profile. Both outputs were `Playing` with 0 underruns at start. The profile JSON was saved with position, role, trim and compensation fields. Speaker-level balance was not measured acoustically.
 
 ## Install at F:\SyncSound
 
