@@ -1,5 +1,15 @@
 //! SyncSound audio engine v0.1: endpoint discovery and synchronized test-signal output.
 //! System-audio WASAPI loopback capture is not yet implemented. Do not claim system mirroring works.
+pub mod audio_format;
+pub mod dsp;
+pub mod metrics;
+pub mod ring_buffer;
+pub mod timeline;
+
+pub use audio_format::{PcmBlock, PcmFormat};
+pub use dsp::{map_channels, resample_interleaved, DelayLine};
+pub use ring_buffer::{BoundedPcmQueue, QueueStatus};
+pub use timeline::{ClockEstimator, MasterTimeline};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use serde::Serialize;
