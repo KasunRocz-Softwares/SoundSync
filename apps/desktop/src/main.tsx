@@ -311,7 +311,7 @@ function App() {
       {info && <div className="info" role="status" onClick={() => setInfo('')}>{info}</div>}
 
       {tab === 'routing' && <>
-      <VirtualSpeakerCard onChange={() => void poll()} />
+      <VirtualSpeakerCard onChange={() => void poll()} running={running} />
       <section className="panel grid2">
         <div>
           <h2>Source</h2>

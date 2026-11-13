@@ -97,10 +97,11 @@ pub fn restore_last_session(state: &AppState) {
         }
     }
     // Virtual speaker was on when SyncSound last closed: switch back to it.
+    // enable_virtual_speaker also starts routing, because with Windows playing
+    // into the cable nothing is audible until SyncSound routes it.
     if settings.virtual_speaker.is_some() {
         let _ = enable_virtual_speaker(state);
-    }
-    if settings.auto_start_routing {
+    } else if settings.auto_start_routing {
         let _ = state.engine.start();
     }
 }
@@ -131,6 +132,41 @@ pub struct VirtualSpeakerStatus {
     pub previous_default_name: Option<String>,
 }
 
+/// Where Windows should go when the virtual speaker is turned off: the saved
+/// previous default, or else a real speaker (an enabled wired output first, then
+/// any enabled output, then any active device). The VB-CABLE installer makes the
+/// cable the default itself, so there often is no "previous" one.
+fn restore_target(state: &AppState, saved: &VirtualSpeaker) -> Option<(String, String)> {
+    let snapshot = state.engine.snapshot();
+    let active = |id: &str| {
+        snapshot
+            .endpoints
+            .iter()
+            .find(|e| e.id == id && e.state == EndpointState::Active && !is_virtual_cable(&e.name))
+            .map(|e| (e.id.clone(), e.name.clone()))
+    };
+    if let Some(found) = saved.previous_default.as_deref().and_then(active) {
+        return Some(found);
+    }
+    let enabled: Vec<_> = snapshot
+        .outputs
+        .iter()
+        .filter(|o| o.config.enabled)
+        .collect();
+    enabled
+        .iter()
+        .filter(|o| !o.bluetooth)
+        .chain(enabled.iter())
+        .find_map(|o| active(&o.endpoint_id))
+        .or_else(|| {
+            snapshot
+                .endpoints
+                .iter()
+                .find(|e| e.state == EndpointState::Active && !is_virtual_cable(&e.name))
+                .map(|e| (e.id.clone(), e.name.clone()))
+        })
+}
+
 fn find_cable(state: &AppState) -> Option<(String, String)> {
     state
         .engine
@@ -145,14 +181,6 @@ pub fn virtual_speaker_status(state: &AppState) -> VirtualSpeakerStatus {
     let cable = find_cable(state);
     let settings = state.settings.lock().unwrap().clone();
     let default = default_render_id().ok().flatten();
-    let snapshot = state.engine.snapshot();
-    let name_of = |id: &str| {
-        snapshot
-            .endpoints
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.name.clone())
-    };
     VirtualSpeakerStatus {
         installed: cable.is_some(),
         default_is_cable: cable
@@ -162,8 +190,9 @@ pub fn virtual_speaker_status(state: &AppState) -> VirtualSpeakerStatus {
         active: settings.virtual_speaker.is_some(),
         previous_default_name: settings
             .virtual_speaker
-            .and_then(|v| v.previous_default)
-            .and_then(|id| name_of(&id)),
+            .as_ref()
+            .and_then(|v| restore_target(state, v))
+            .map(|(_, name)| name),
     }
 }
 
@@ -192,12 +221,20 @@ pub fn enable_virtual_speaker(state: &AppState) -> Result<(), CommandError> {
         set_default_render(&cable_id)
             .map_err(|e| fail(&format!("Could not change the Windows default device: {e}")))?;
     }
-    let mut settings = state.settings.lock().unwrap();
-    settings.virtual_speaker = Some(VirtualSpeaker {
-        cable_id,
-        previous_default: previous,
-    });
-    save_settings(&state.data_dir, &settings)
+    {
+        let mut settings = state.settings.lock().unwrap();
+        settings.virtual_speaker = Some(VirtualSpeaker {
+            cable_id,
+            previous_default: previous,
+        });
+        save_settings(&state.data_dir, &settings)?;
+    }
+    // Windows now plays into the silent cable: route it, or there is no sound.
+    state.engine.start().map_err(|e| {
+        fail(&format!(
+            "Virtual speaker is on but routing did not start: {e}"
+        ))
+    })
 }
 
 /// Restores the previous Windows default. `forget` = false keeps the mode
@@ -208,8 +245,8 @@ pub fn disable_virtual_speaker(state: &AppState, forget: bool) -> Result<(), Com
     let Some(saved) = saved else {
         return Ok(());
     };
-    if let Some(previous) = &saved.previous_default {
-        set_default_render(previous).map_err(|e| {
+    if let Some((target, _)) = restore_target(state, &saved) {
+        set_default_render(&target).map_err(|e| {
             fail(&format!(
                 "Could not restore the Windows default device: {e}"
             ))

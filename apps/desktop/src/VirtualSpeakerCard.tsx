@@ -8,7 +8,7 @@ import type { VirtualSpeakerStatus } from './types';
  * captures it, so every real speaker — including the old default — can be
  * delayed and aligned.
  */
-export function VirtualSpeakerCard({ onChange }: { onChange: () => void }) {
+export function VirtualSpeakerCard({ onChange, running }: { onChange: () => void; running: boolean }) {
   const [status, setStatus] = useState<VirtualSpeakerStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -47,6 +47,9 @@ export function VirtualSpeakerCard({ onChange }: { onChange: () => void }) {
     {status?.active && <p className="capture ok"><span className="dot" />
       Windows plays into {status.cable_name}; SyncSound captures it.{status.previous_default_name ? ` Your previous default (${status.previous_default_name}) comes back when you turn this off or quit.` : ''}
       {!status.default_is_cable && ' Windows default was changed elsewhere — toggle off and on to switch back.'}
+    </p>}
+    {status?.active && !running && <p className="field-error" role="alert">
+      Routing is stopped, so you hear nothing: Windows is playing into the silent cable. Press Start routing, or turn the virtual speaker off to go back to {status.previous_default_name ?? 'your previous speakers'}.
     </p>}
     {error && <p className="field-error">{error}</p>}
   </section>;
