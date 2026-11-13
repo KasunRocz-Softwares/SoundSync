@@ -7,7 +7,7 @@ SyncSound v0.1.0, **developer preview**. Host: Windows 11 Pro build 26300, Rust 
 | Command | Result |
 |---|---|
 | `npm ci`, `npm run build` | Passed |
-| `cargo test --workspace` | 63 passed (54 engine unit + 9 portable capture), 4 hardware tests ignored by default |
+| `cargo test --workspace` | 65 passed (56 engine unit + 9 portable capture), 4 hardware tests ignored by default |
 | `cargo check --workspace` | Passed |
 | `npm run desktop:build` | Passed; produced both bundles |
 
