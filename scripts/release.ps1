@@ -26,6 +26,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
+# Windows PowerShell 5.1's "utf8" adds a byte-order mark, which JSON and TOML readers may reject.
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+function Write-Utf8([string]$Path, [string]$Text) {
+    [System.IO.File]::WriteAllText((Join-Path (Get-Location) $Path), $Text, $utf8)
+}
+
 $confPath = 'apps/desktop/src-tauri/tauri.conf.json'
 $conf = Get-Content $confPath -Raw | ConvertFrom-Json
 if (-not $Version) { $Version = $conf.version }
@@ -35,13 +41,13 @@ if ($conf.version -ne $Version) {
     Write-Host "==> Bumping version $($conf.version) -> $Version"
     foreach ($file in @($confPath, 'package.json')) {
         $text = Get-Content $file -Raw
-        $text = $text -replace '"version":\s*"\d+\.\d+\.\d+"', "`"version`": `"$Version`""
-        Set-Content $file $text -NoNewline -Encoding utf8
+        $text = [regex]::Replace($text, '"version":\s*"\d+\.\d+\.\d+"', "`"version`": `"$Version`"", 1)
+        Write-Utf8 $file $text
     }
     foreach ($file in @('apps/desktop/src-tauri/Cargo.toml', 'crates/syncsound-engine/Cargo.toml')) {
         $text = Get-Content $file -Raw
         $text = [regex]::Replace($text, '(?m)^version = "\d+\.\d+\.\d+"', "version = `"$Version`"", 1)
-        Set-Content $file $text -NoNewline -Encoding utf8
+        Write-Utf8 $file $text
     }
 }
 
@@ -68,7 +74,7 @@ $manifest = [ordered]@{
     }
 }
 $latest = 'target/release/bundle/latest.json'
-$manifest | ConvertTo-Json -Depth 5 | Set-Content $latest -Encoding utf8
+Write-Utf8 $latest ($manifest | ConvertTo-Json -Depth 5)
 Write-Host "==> Wrote $latest"
 
 if (-not $Publish) {

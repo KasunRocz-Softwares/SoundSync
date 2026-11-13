@@ -2,6 +2,15 @@
 
 **Status: Developer preview.** SyncSound captures Windows audio with WASAPI shared-mode loopback and plays it on up to eight output devices at the same time, each with its own gain, mute, delay, buffer, and drift correction. Latency and alignment figures are **estimates** from Windows-reported buffer sizes. They are not acoustic measurements and exclude Bluetooth/HDMI transport delay and speaker distance. Microphone calibration is not part of v0.1.
 
+
+**[Download the latest release](https://github.com/KasunRocz-Softwares/SoundSync/releases/latest)** (Windows 11 x64)
+
+| Speaker setup: room map, 7.1 and 8D | Per-speaker equalizer |
+|---|---|
+| ![Speaker setup](docs/screenshots/02-speaker-setup.png) | ![Equalizer](docs/screenshots/04-equalizer.png) |
+| **Routing** | **Route only selected apps** |
+| ![Routing](docs/screenshots/01-routing.png) | ![Apps](docs/screenshots/03-apps.png) |
+
 ## What works
 
 - Render endpoint catalog with stable Windows endpoint IDs, default state, format, and best-effort connection type.
@@ -98,7 +107,8 @@ SyncSound checks GitHub Releases for a newer version when it starts. You can tur
 ### Publishing a release (maintainers)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scriptselease.ps1 -Version 0.2.1 -Notes "What changed" -Publish
+powershell -ExecutionPolicy Bypass -File .\scripts
+elease.ps1 -Version 0.2.1 -Notes "What changed" -Publish
 ```
 
 The script bumps the version, runs the tests, builds the NSIS and MSI installers signed with the updater key (`%USERPROFILE%\.tauri\syncsound-updater.key`, never committed), writes `latest.json`, tags the release and uploads it with `gh`. Back up the key. Without it, existing installs cannot accept future updates.
