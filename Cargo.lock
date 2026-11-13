@@ -3670,7 +3670,7 @@ dependencies = [
 
 [[package]]
 name = "syncsound-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3684,7 +3684,7 @@ dependencies = [
 
 [[package]]
 name = "syncsound-engine"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crossbeam-queue",
  "serde",
