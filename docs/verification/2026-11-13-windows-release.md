@@ -40,6 +40,21 @@ Bluetooth A2DP endpoint: PnP enumerator `BTHENUM`, mix format 44.1 kHz stereo (W
 
 Windows reports 23.4 ms device latency for the Bluetooth endpoint, about the same as HDMI (22.0 ms). Real A2DP codec and radio delay is not included, so Synchronized mode added no alignment. The UI now tags Bluetooth outputs and tells the user to add delay to the other outputs. Acoustic offset was **not measured**.
 
+## Acoustic measurement: Realtek speakers (front) + iOX 2 (behind the listener)
+
+Setup chosen by the user: Windows default = Speakers (Realtek), which Windows plays directly. The installed app captures the Windows default output and mirrors it to the iOX 2 (Bluetooth) in Gaming mode, with 0 ms delay. Measured with `cargo run -p syncsound-engine --example calibrate -- hs80 "iox 2" gaming <dir> [muted|off]`. The tool plays 8 clicks 1 s apart on the default output, records the Corsair HS80 microphone at the listening position, and folds the recording on the 1 s click period.
+
+| Run | Direct (Realtek) | Second arrival | Notes |
+|---|---|---|---|
+| Music playing | — | — | Not usable: clicks only about 2× above the background |
+| Quiet room | 104.8× noise | +350 ms, 20.6× | Two engines were mirroring to the iOX 2 (installed app + test tool) |
+| Test tool muted | 98.9× | +348 ms, 17.8× | Second arrival came from the installed app's iOX 2 stream |
+| Test tool routing off | 80.9× | +346 ms, 15.0× | Same; audio sessions confirmed only `syncsound-desktop` renders to the iOX 2 |
+
+**Result: at the listening position the iOX 2 plays about 346–350 ms after the Realtek speakers.** SyncSound's own share is the buffer in Gaming mode, about 20 ms plus the endpoint buffer. Most of the gap is Bluetooth codec and radio delay, which Windows does not report. While Realtek stays the Windows default, nothing can delay it, so this gap remains.
+
+Also found: the installed app allows a second instance to run, and both instances can mirror audio at the same time.
+
 ## Install at F:\SyncSound
 
 `scripts/install-windows.ps1 -InstallDir F:\SyncSound -Upgrade`, exit 0:

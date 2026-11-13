@@ -19,9 +19,10 @@ fn main() {
             .filter(|e| e.state == EndpointState::Active)
         {
             println!(
-                "{}{} | {} | bus={:?} | {:?} | {:?}-bit",
+                "{}{} | {:?} | {} | bus={:?} | {:?} | {:?}-bit",
                 if e.is_default { "* " } else { "  " },
                 e.name,
+                e.state,
                 e.connection_type.as_deref().unwrap_or("?"),
                 e.bus,
                 e.mix_format,
