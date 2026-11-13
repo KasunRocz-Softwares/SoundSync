@@ -43,6 +43,19 @@ Presets set what each output plays and its level, and keep your gain, delay and 
 
 With **Compensate for distance** on, nearer speakers are delayed by 2.9 ms per metre and turned down by inverse distance (never below 25%). That way sound from every speaker reaches your seat together and evenly. If you tuned delays with a microphone at your seat, turn it off, because the measurement already includes distance. All of these settings are saved in profiles.
 
+## Room map, 7.1 and 8D
+
+The **Speaker setup** panel includes a top-down room map. You sit in the centre, the screen is at the top, and the standard 7.1 positions (C, FL, FR, SL, SR, BL, BR) are marked. Drag each enabled output to where it really is. It snaps to the 7.1 positions when it's within 10°. Distance rings run from 1 to 5 m.
+
+Turn on **Spatial sound from this map** to pan the audio to your speakers by their position on the map (pairwise constant-power panning):
+
+- **Stereo:** a virtual left and right channel at ±30°.
+- **7.1 surround:** center, front, side and back channels built from the stereo capture. This is a matrix upmix; Windows loopback provides stereo, not discrete 7.1. Outputs marked **Subwoofer** get low-passed bass (about 120 Hz).
+- **8D audio:** the whole virtual field rotates around you, one turn every 2–60 s, clockwise or counter-clockwise. The rotation follows the audio timeline, so every output turns in step.
+- **Width:** single box, small stereo (±15°), wide pair (±45°) or headphones (±90°). Use Headphones on a single pair of headphones for the classic 8D effect.
+
+Spatial mode changes only what each speaker plays. Delay, gain, level and alignment still apply. All settings are saved in profiles.
+
 ## Requirements (Windows 11 x64)
 
 - Node.js 22 or later and npm
