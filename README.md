@@ -1,7 +1,6 @@
-# SyncSound v0.1 — Windows multi-output audio router
+# SyncSound — play Windows audio on every speaker, in sync
 
-**Status: Developer preview.** SyncSound captures Windows audio with WASAPI shared-mode loopback and plays it on up to eight output devices at the same time, each with its own gain, mute, delay, buffer, and drift correction. Latency and alignment figures are **estimates** from Windows-reported buffer sizes. They are not acoustic measurements and exclude Bluetooth/HDMI transport delay and speaker distance. Microphone calibration is not part of v0.1.
-
+**Status: developer preview.** SyncSound captures Windows audio with WASAPI loopback and plays it on up to eight outputs at once: wired, USB, HDMI and Bluetooth. Each output has its own buffer, drift correction, gain, mute, delay and EQ. A one-click microphone calibration measures when each speaker reaches your seat and sets the delays for you. The latency numbers on the output cards are Windows estimates; use Calibrate for measured alignment.
 
 **[Download the latest release](https://github.com/KasunRocz-Softwares/SoundSync/releases/latest)** (Windows 11 x64)
 
