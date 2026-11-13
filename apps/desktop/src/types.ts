@@ -42,11 +42,22 @@ export type OutputConfig = {
   azimuth_deg: number | null; spread: StereoSpread; subwoofer: boolean; eq: EqSettings;
 };
 
-export type EqSettings = { enabled: boolean; low_cut_hz: number; bass_db: number; mid_db: number; treble_db: number };
+export type EqSettings = {
+  enabled: boolean; low_cut_hz: number; bass_db: number; mid_db: number; treble_db: number;
+  room_correction: boolean; correction_db: number[];
+};
+export const ROOM_BANDS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+export type RoomResult = { response_db: (number | null)[]; correction_db: number[]; snr_db: number };
+export type RoomOutput = { endpoint_id: string; name: string; applied: boolean; result: RoomResult | null };
+export type RoomReport = { microphone: string; message: string; outputs: RoomOutput[] };
+export type AppSettings = { restore_last_session: boolean; auto_start_routing: boolean; close_to_tray: boolean };
+export type VirtualSpeakerStatus = {
+  installed: boolean; cable_name: string | null; active: boolean; default_is_cable: boolean; previous_default_name: string | null;
+};
 export type AudioApp = { exe: string; name: string; pid: number; active: boolean };
 export type AppSourceStatus = { exe: string; pid: number | null; capturing: boolean };
 export type Microphone = { id: string; name: string; is_default: boolean };
-export type CalibrationProgress = { elapsed_s: number; total_s: number; playing: string | null };
+export type CalibrationProgress = { elapsed_s: number; total_s: number; playing: string | null; measuring_room: boolean };
 export type CalibratedOutput = {
   endpoint_id: string; name: string; detected: boolean; snr: number; relative_ms: number | null;
   old_delay_ms: number; new_delay_ms: number;

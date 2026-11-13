@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-virtual-speaker-status"
+description = "Enables the virtual_speaker_status command without any pre-configured scope."
+commands.allow = ["virtual_speaker_status"]
+
+[[permission]]
+identifier = "deny-virtual-speaker-status"
+description = "Denies the virtual_speaker_status command without any pre-configured scope."
+commands.deny = ["virtual_speaker_status"]

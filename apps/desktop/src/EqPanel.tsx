@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
-import type { EngineSnapshot, EqSettings, OutputStatus } from './types';
+import { ROOM_BANDS, type EngineSnapshot, type EqSettings, type OutputStatus } from './types';
 
 const LOW_CUTS = [0, 40, 60, 80, 100, 120, 150];
-const PRESETS: { label: string; eq: Omit<EqSettings, 'enabled'> }[] = [
+const PRESETS: { label: string; eq: Omit<EqSettings, 'enabled' | 'room_correction' | 'correction_db'> }[] = [
   { label: 'Flat', eq: { low_cut_hz: 0, bass_db: 0, mid_db: 0, treble_db: 0 } },
   { label: 'Bass boost', eq: { low_cut_hz: 0, bass_db: 6, mid_db: 0, treble_db: 1 } },
   { label: 'Small speaker', eq: { low_cut_hz: 100, bass_db: -2, mid_db: 1, treble_db: 0 } },
@@ -43,10 +43,13 @@ function mag([b0, b1, b2, a1, a2]: Bq, f: number) {
   return Math.sqrt((nr * nr + ni * ni) / (dr * dr + di * di));
 }
 function responseDb(eq: EqSettings, f: number) {
-  if (!eq.enabled) return 0;
-  const stages = [eq.low_cut_hz ? highPass(eq.low_cut_hz) : null, shelf(100, eq.bass_db, false), peak(1000, eq.mid_db, 0.9), shelf(8000, eq.treble_db, true)];
-  const headroom = -Math.max(0, eq.bass_db, eq.mid_db, eq.treble_db);
-  return stages.reduce((db, s) => db + (s ? 20 * Math.log10(mag(s, f)) : 0), headroom);
+  const manual = eq.enabled
+    ? [eq.low_cut_hz ? highPass(eq.low_cut_hz) : null, shelf(100, eq.bass_db, false), peak(1000, eq.mid_db, 0.9), shelf(8000, eq.treble_db, true)]
+    : [];
+  const room = eq.room_correction ? ROOM_BANDS.map((b, i) => (b < RATE * 0.45 ? peak(b, eq.correction_db[i] ?? 0, 1.41) : null)) : [];
+  const headroom = -(eq.enabled ? Math.max(0, eq.bass_db, eq.mid_db, eq.treble_db) : 0)
+    - (eq.room_correction ? Math.max(0, ...eq.correction_db) : 0);
+  return [...manual, ...room].reduce((db, s) => db + (s ? 20 * Math.log10(mag(s, f)) : 0), headroom);
 }
 
 function Curve({ eq }: { eq: EqSettings }) {
@@ -60,11 +63,11 @@ function Curve({ eq }: { eq: EqSettings }) {
       pts.push(`${i ? 'L' : 'M'}${xs(f).toFixed(1)},${ys(responseDb(eq, f)).toFixed(1)}`);
     }
     return pts.join(' ');
-  }, [eq.enabled, eq.low_cut_hz, eq.bass_db, eq.mid_db, eq.treble_db]);
+  }, [eq.enabled, eq.low_cut_hz, eq.bass_db, eq.mid_db, eq.treble_db, eq.room_correction, eq.correction_db.join(',')]);
   return <svg className="eq-curve" viewBox={`0 0 ${W} ${H + 16}`} role="img" aria-label="Frequency response">
     {[100, 1000, 10000].map(f => <g key={f}><line x1={xs(f)} x2={xs(f)} y1={0} y2={H} /><text x={xs(f)} y={H + 12}>{f >= 1000 ? `${f / 1000}k` : f}</text></g>)}
     <line className="zero" x1={0} x2={W} y1={ys(0)} y2={ys(0)} />
-    <path d={path} className={eq.enabled ? 'on' : ''} />
+    <path d={path} className={eq.enabled || eq.room_correction ? 'on' : ''} />
   </svg>;
 }
 
@@ -87,7 +90,7 @@ function OutputEq({ output, act }: { output: OutputStatus; act: (fn: () => Promi
   const set = (patch: Partial<EqSettings>) => act(() => api.eq(output.endpoint_id, { ...eq, ...patch }));
   return <article className={`device eq-card ${eq.enabled ? 'on' : ''}`}>
     <div className="device-top">
-      <div className="device-info"><h3>{output.name}</h3><p>{eq.enabled ? 'Equalizer on' : 'Equalizer off — sound passes through unchanged'}</p></div>
+      <div className="device-info"><h3>{output.name}</h3><p>{eq.enabled ? 'Equalizer on' : 'Equalizer off'}{eq.room_correction ? ' · room correction on' : ''}</p></div>
       <label className="switch">
         <input type="checkbox" checked={eq.enabled} onChange={e => set({ enabled: e.target.checked })} />
         <span aria-hidden="true" /><span className="sr">Equalizer for {output.name}</span>
@@ -107,6 +110,16 @@ function OutputEq({ output, act }: { output: OutputStatus; act: (fn: () => Promi
         <BandSlider label="Treble" value={eq.treble_db} disabled={!eq.enabled} onCommit={v => set({ treble_db: v })} />
         <div className="presets">
           {PRESETS.map(p => <button key={p.label} disabled={!eq.enabled} onClick={() => set(p.eq)}>{p.label}</button>)}
+        </div>
+        <div className="room-row">
+          <label className="check">
+            <input type="checkbox" checked={eq.room_correction} disabled={eq.correction_db.every(c => c === 0)}
+              onChange={e => set({ room_correction: e.target.checked })} />
+            Room correction
+          </label>
+          {eq.correction_db.some(c => c !== 0)
+            ? <span className="bands">{ROOM_BANDS.map((b, i) => eq.correction_db[i] ? <span key={b} className={eq.correction_db[i] < 0 ? 'cut' : 'boost'}>{b >= 1000 ? `${b / 1000}k` : b} {eq.correction_db[i] > 0 ? '+' : ''}{eq.correction_db[i].toFixed(1)}</span> : null)}</span>
+            : <span className="muted">Not measured yet — use Measure room on the Speaker setup tab.</span>}
         </div>
       </div>
       <Curve eq={eq} />

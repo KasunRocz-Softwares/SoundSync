@@ -38,6 +38,13 @@
     "allow-list-microphones",
     "allow-calibrate",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "allow-measure-room",
+    "allow-get-app-settings",
+    "allow-set-app-settings",
+    "allow-virtual-speaker-status",
+    "allow-enable-virtual-speaker",
+    "allow-disable-virtual-speaker",
+    "autostart:default"
   ]
 }

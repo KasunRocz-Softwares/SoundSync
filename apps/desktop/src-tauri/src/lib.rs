@@ -14,17 +14,49 @@ use syncsound_engine::placement::{validate_distance, validate_trim, SoundPreset,
 use syncsound_engine::platform::windows_mic::Microphone;
 use syncsound_engine::profile::{MissingOutput, Profile, ProfileStore};
 use syncsound_engine::render::{AudioMode, ChannelRole};
-use syncsound_engine::routing::CalibrationReport;
+use syncsound_engine::routing::{CalibrationReport, RoomReport};
 use syncsound_engine::spatial::{
     validate_azimuth, validate_spatial, SourceLayout, SpatialConfig, StereoSpread,
 };
 use syncsound_engine::{diagnostics, AudioEngine, EngineError, EngineSnapshot, OutputStatus};
 use tauri::{Manager, State};
 
-struct AppState {
-    engine: AudioEngine,
-    profiles: ProfileStore,
+mod system;
+
+pub(crate) struct AppState {
+    pub(crate) engine: AudioEngine,
+    pub(crate) profiles: ProfileStore,
     diagnostics_dir: PathBuf,
+    pub(crate) data_dir: PathBuf,
+    pub(crate) settings: std::sync::Mutex<system::AppSettings>,
+    /// Set by the tray's Quit so the close-to-tray handler lets the app exit.
+    pub(crate) quitting: std::sync::atomic::AtomicBool,
+}
+
+/// Applies a profile to the engine: mode, compensation, spatial, source, outputs.
+pub(crate) fn apply_profile(
+    engine: &AudioEngine,
+    profile: &Profile,
+) -> CmdResult<ProfileLoadReport> {
+    let endpoints = engine.refresh_endpoints().map_err(engine_error)?;
+    let plan = profile.plan_apply(&endpoints);
+    engine.set_mode(plan.mode).map_err(engine_error)?;
+    engine
+        .set_distance_compensation(plan.distance_compensation)
+        .map_err(engine_error)?;
+    engine.set_spatial(plan.spatial).map_err(engine_error)?;
+    if let Some(source) = plan.source.clone() {
+        engine.set_source(source).map_err(engine_error)?;
+    }
+    let applied_outputs = plan.outputs.len();
+    engine.apply_outputs(plan.outputs).map_err(engine_error)?;
+    Ok(ProfileLoadReport {
+        name: profile.name.clone(),
+        mode: plan.mode,
+        applied_outputs,
+        missing: plan.missing,
+        missing_source: plan.missing_source,
+    })
 }
 
 type CmdResult<T> = Result<T, CommandError>;
@@ -59,14 +91,22 @@ async fn get_engine_status(state: State<'_, AppState>) -> CmdResult<EngineSnapsh
 }
 
 #[tauri::command]
-async fn start_audio_engine(state: State<'_, AppState>) -> CmdResult<EngineSnapshot> {
+async fn start_audio_engine(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<EngineSnapshot> {
     state.engine.start().map_err(engine_error)?;
+    system::refresh_tray(&app);
     Ok(state.engine.snapshot())
 }
 
 #[tauri::command]
-async fn stop_audio_engine(state: State<'_, AppState>) -> CmdResult<EngineSnapshot> {
+async fn stop_audio_engine(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<EngineSnapshot> {
     state.engine.stop().map_err(engine_error)?;
+    system::refresh_tray(&app);
     Ok(state.engine.snapshot())
 }
 
@@ -239,6 +279,69 @@ async fn set_spatial(
 }
 
 #[tauri::command]
+async fn get_app_settings(state: State<'_, AppState>) -> CmdResult<system::AppSettings> {
+    Ok(state.settings.lock().unwrap().clone())
+}
+
+/// Updates the user-editable settings (the virtual-speaker field is managed separately).
+#[tauri::command]
+async fn set_app_settings(
+    restore_last_session: bool,
+    auto_start_routing: bool,
+    close_to_tray: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<system::AppSettings> {
+    let mut settings = state.settings.lock().unwrap();
+    settings.restore_last_session = restore_last_session;
+    settings.auto_start_routing = auto_start_routing;
+    settings.close_to_tray = close_to_tray;
+    system::save_settings(&state.data_dir, &settings)?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
+async fn virtual_speaker_status(
+    state: State<'_, AppState>,
+) -> CmdResult<system::VirtualSpeakerStatus> {
+    Ok(system::virtual_speaker_status(&state))
+}
+
+#[tauri::command]
+async fn enable_virtual_speaker(
+    state: State<'_, AppState>,
+) -> CmdResult<system::VirtualSpeakerStatus> {
+    system::enable_virtual_speaker(&state)?;
+    Ok(system::virtual_speaker_status(&state))
+}
+
+#[tauri::command]
+async fn disable_virtual_speaker(
+    state: State<'_, AppState>,
+) -> CmdResult<system::VirtualSpeakerStatus> {
+    system::disable_virtual_speaker(&state, true)?;
+    Ok(system::virtual_speaker_status(&state))
+}
+
+/// Plays a frequency sweep through each playing output, measures it with the
+/// microphone and stores a room-correction EQ (about 5.5 s per output).
+#[tauri::command]
+async fn measure_room(mic_id: String, state: State<'_, AppState>) -> CmdResult<RoomReport> {
+    if mic_id.is_empty()
+        || mic_id.len() > MAX_ENDPOINT_ID_LEN
+        || mic_id.chars().any(char::is_control)
+    {
+        return Err(CommandError::new(
+            "invalid_id",
+            "Microphone ID is malformed",
+        ));
+    }
+    state
+        .engine
+        .measure_room(mic_id)
+        .map_err(|e| CommandError::new("calibration", e.to_string()))
+}
+
+#[tauri::command]
 async fn list_microphones(state: State<'_, AppState>) -> CmdResult<Vec<Microphone>> {
     state.engine.list_microphones().map_err(engine_error)
 }
@@ -330,9 +433,20 @@ async fn get_sync_metrics(state: State<'_, AppState>) -> CmdResult<SyncMetrics> 
 }
 
 #[tauri::command]
-async fn save_profile(name: String, state: State<'_, AppState>) -> CmdResult<String> {
+async fn save_profile(
+    name: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<String> {
+    if name == system::LAST_SESSION_NAME {
+        return Err(CommandError::new(
+            "invalid_profile_name",
+            "That name is reserved",
+        ));
+    }
     let profile = Profile::from_snapshot(&name, &state.engine.snapshot())?;
     let path = state.profiles.save(&profile)?;
+    system::refresh_tray(&app);
     Ok(path.display().to_string())
 }
 
@@ -351,34 +465,15 @@ struct ProfileLoadReport {
 }
 
 #[tauri::command]
-async fn load_profile(name: String, state: State<'_, AppState>) -> CmdResult<ProfileLoadReport> {
+async fn load_profile(
+    name: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<ProfileLoadReport> {
     let profile = state.profiles.load(&name)?;
-    let endpoints = state.engine.refresh_endpoints().map_err(engine_error)?;
-    let plan = profile.plan_apply(&endpoints);
-    state.engine.set_mode(plan.mode).map_err(engine_error)?;
-    state
-        .engine
-        .set_distance_compensation(plan.distance_compensation)
-        .map_err(engine_error)?;
-    state
-        .engine
-        .set_spatial(plan.spatial)
-        .map_err(engine_error)?;
-    if let Some(source) = plan.source.clone() {
-        state.engine.set_source(source).map_err(engine_error)?;
-    }
-    let applied_outputs = plan.outputs.len();
-    state
-        .engine
-        .apply_outputs(plan.outputs)
-        .map_err(engine_error)?;
-    Ok(ProfileLoadReport {
-        name: profile.name,
-        mode: plan.mode,
-        applied_outputs,
-        missing: plan.missing,
-        missing_source: plan.missing_source,
-    })
+    let report = apply_profile(&state.engine, &profile)?;
+    system::refresh_tray(&app);
+    Ok(report)
 }
 
 /// Explicit, user-confirmed rebind of a missing saved device to a present endpoint.
@@ -434,15 +529,50 @@ pub fn run() {
         // Signed auto-update from GitHub Releases (public key in tauri.conf.json).
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Start with Windows (toggled from the UI); launched hidden in the tray.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .setup(|app| {
-            // Profiles and diagnostics live in per-user app data, never the install dir.
+            // Profiles, settings and diagnostics live in per-user app data, never the install dir.
             let data = app.path().app_data_dir()?;
             app.manage(AppState {
                 engine: AudioEngine::spawn(),
                 profiles: ProfileStore::new(data.join("profiles")),
                 diagnostics_dir: data.join("diagnostics"),
+                settings: std::sync::Mutex::new(system::load_settings(&data)),
+                data_dir: data,
+                quitting: std::sync::atomic::AtomicBool::new(false),
             });
+            if std::env::args().any(|a| a == "--minimized") {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            system::create_tray(app.handle())?;
+            // Restore off the UI thread; the engine call can take a moment.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Some(state) = handle.try_state::<AppState>() {
+                    system::restore_last_session(&state);
+                }
+                system::refresh_tray(&handle);
+            });
+            system::spawn_session_saver(app.handle().clone());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                if let Some(state) = app.try_state::<AppState>() {
+                    let to_tray = state.settings.lock().unwrap().close_to_tray;
+                    if to_tray && !state.quitting.load(std::sync::atomic::Ordering::Acquire) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_audio_devices,
@@ -475,13 +605,22 @@ pub fn run() {
             list_audio_apps,
             select_app_sources,
             list_microphones,
-            calibrate
+            calibrate,
+            measure_room,
+            get_app_settings,
+            set_app_settings,
+            virtual_speaker_status,
+            enable_virtual_speaker,
+            disable_virtual_speaker
         ])
         .build(tauri::generate_context!())
         .expect("error while building SyncSound");
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
             if let Some(state) = handle.try_state::<AppState>() {
+                system::save_last_session(&state);
+                // Never leave Windows pointed at a silent virtual cable.
+                let _ = system::disable_virtual_speaker(&state, false);
                 let _ = state.engine.stop();
             }
         }

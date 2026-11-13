@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpatialConfig,
   SpeakerPosition, StereoSpread, EqSettings, AudioApp, Microphone, CalibrationReport,
+  RoomReport, AppSettings, VirtualSpeakerStatus,
 } from './types';
 
 export function errorMessage(error: unknown): string {
@@ -45,6 +46,14 @@ export const api = {
   selectApps: (exes: string[]) => invoke<void>('select_app_sources', { exes }),
   mics: () => invoke<Microphone[]>('list_microphones'),
   calibrate: (micId: string) => invoke<CalibrationReport>('calibrate', { micId }),
+  measureRoom: (micId: string) => invoke<RoomReport>('measure_room', { micId }),
+  settings: () => invoke<AppSettings & { virtual_speaker: unknown }>('get_app_settings'),
+  saveSettings: (s: AppSettings) => invoke<AppSettings>('set_app_settings', {
+    restoreLastSession: s.restore_last_session, autoStartRouting: s.auto_start_routing, closeToTray: s.close_to_tray,
+  }),
+  virtualSpeaker: () => invoke<VirtualSpeakerStatus>('virtual_speaker_status'),
+  enableVirtualSpeaker: () => invoke<VirtualSpeakerStatus>('enable_virtual_speaker'),
+  disableVirtualSpeaker: () => invoke<VirtualSpeakerStatus>('disable_virtual_speaker'),
   spatial: (c: SpatialConfig) =>
     invoke<void>('set_spatial', { enabled: c.enabled, layout: c.layout, rotationS: c.rotation_s, clockwise: c.clockwise }),
 };

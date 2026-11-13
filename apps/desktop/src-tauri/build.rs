@@ -32,6 +32,12 @@ const COMMANDS: &[&str] = &[
     "select_app_sources",
     "list_microphones",
     "calibrate",
+    "measure_room",
+    "get_app_settings",
+    "set_app_settings",
+    "virtual_speaker_status",
+    "enable_virtual_speaker",
+    "disable_virtual_speaker",
 ];
 
 fn main() {
