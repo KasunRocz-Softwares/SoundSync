@@ -66,6 +66,16 @@ function DelayInput({ value, onCommit }: { value: number; onCommit: (v: number) 
     onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />;
 }
 
+// Mirrors syncsound-engine profile::validate_name.
+const PROFILE_NAME = /^[\p{L}\p{N} _\-+&(),]{1,64}$/u;
+function profileNameProblem(name: string): string | null {
+  if (!name) return null;
+  if (name.trim() !== name) return 'Remove spaces at the start or end.';
+  if ([...name].length > 64) return 'Use at most 64 characters.';
+  if (!PROFILE_NAME.test(name)) return 'Use letters, digits, spaces and - _ + & ( ) , only.';
+  return null;
+}
+
 function fmt(n: number, digits = 0) { return Number.isFinite(n) ? n.toFixed(digits) : '—'; }
 
 function OutputCard({ endpoint, status, running, enabledCount, onAction }: {
@@ -132,6 +142,7 @@ function App() {
   const [report, setReport] = useState<ProfileLoadReport | null>(null);
   const [rebindTargets, setRebindTargets] = useState<Record<string, string>>({});
   const [info, setInfo] = useState('');
+  const [profileMessage, setProfileMessage] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
 
   const poll = useCallback(async () => {
     try { setSnapshot(await api.status()); } catch (e) { setError(errorMessage(e)); }
@@ -162,6 +173,16 @@ function App() {
     setBusy(true); setError('');
     try { await api.devices(); await poll(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
   }
+  /** Profile actions report success and failure next to the controls, not at the page top. */
+  function profileAct(fn: () => Promise<string>) {
+    setProfileMessage(null);
+    fn().then(
+      text => { setProfileMessage({ tone: 'ok', text }); void poll(); },
+      e => { setProfileMessage({ tone: 'bad', text: errorMessage(e) }); void poll(); },
+    );
+  }
+  const nameProblem = profileNameProblem(profileName);
+
   function changeSource(value: string) {
     const [kind, ...rest] = value.split(':');
     act(() => api.selectSource(kind as SourceKind, kind === 'endpoint' ? rest.join(':') : undefined));
@@ -231,21 +252,25 @@ function App() {
         <div>
           <h2>Profiles</h2>
           <div className="row">
-            <input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Profile name" maxLength={64} aria-label="Profile name" />
-            <button disabled={!profileName.trim()} onClick={() => act(async () => {
-              await api.saveProfile(profileName.trim()); setInfo(`Saved profile “${profileName.trim()}”.`); refreshProfiles();
+            <input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Profile name" maxLength={64}
+              aria-label="Profile name" aria-invalid={nameProblem != null} aria-describedby="profile-name-hint" />
+            <button disabled={!profileName || nameProblem != null} onClick={() => profileAct(async () => {
+              await api.saveProfile(profileName); refreshProfiles(); setSelectedProfile(profileName);
+              return `Saved profile “${profileName}”.`;
             })}><Save size={15} /> Save</button>
           </div>
+          {nameProblem && <p id="profile-name-hint" className="field-error">{nameProblem}</p>}
           <div className="row">
             <select value={selectedProfile} onChange={e => setSelectedProfile(e.target.value)} aria-label="Saved profiles">
               <option value="">{profiles.length ? 'Choose a profile…' : 'No saved profiles'}</option>
               {profiles.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            <button disabled={!selectedProfile} onClick={() => act(async () => {
+            <button disabled={!selectedProfile} onClick={() => profileAct(async () => {
               const r = await api.loadProfile(selectedProfile); setReport(r); setRebindTargets({});
-              setInfo(`Loaded “${r.name}”: ${r.applied_outputs} output(s) applied${r.missing.length ? `, ${r.missing.length} missing` : ''}.`);
+              return `Loaded “${r.name}”: ${r.applied_outputs} output(s) applied${r.missing.length ? `, ${r.missing.length} missing` : ''}.`;
             })}><FolderOpen size={15} /> Load</button>
           </div>
+          {profileMessage && <p className={profileMessage.tone === 'ok' ? 'field-ok' : 'field-error'} role="status">{profileMessage.text}</p>}
           {report && (report.missing.length > 0 || report.missing_source) && <div className="missing">
             <strong>Missing devices in “{report.name}”</strong>
             <p className="hint">These saved devices are not connected. SyncSound never substitutes a device with a similar name — choose a replacement explicitly, or reconnect the device and load again.</p>
@@ -257,10 +282,10 @@ function App() {
                 <option value="">Replace with…</option>
                 {active.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
-              <button disabled={!rebindTargets[m.endpoint_id]} onClick={() => act(async () => {
+              <button disabled={!rebindTargets[m.endpoint_id]} onClick={() => profileAct(async () => {
                 await api.rebind(report.name, m.endpoint_id, rebindTargets[m.endpoint_id]);
                 const r = await api.loadProfile(report.name); setReport(r);
-                setInfo(`Rebound and reloaded “${r.name}”.`);
+                return `Rebound and reloaded “${r.name}”.`;
               })}>Rebind</button>
             </div>)}
           </div>}

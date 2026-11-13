@@ -134,3 +134,6 @@ footer { display: flex; align-items: center; justify-content: space-between; gap
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+.field-error { color: var(--bad); font-size: 12.5px; margin: -2px 0 10px; }
+.field-ok { color: #9fe8d9; font-size: 12.5px; margin: -2px 0 10px; overflow-wrap: anywhere; }
+.row input[aria-invalid="true"] { border-color: #a5474f; }

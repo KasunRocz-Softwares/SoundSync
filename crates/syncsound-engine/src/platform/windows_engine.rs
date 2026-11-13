@@ -687,7 +687,13 @@ impl Core {
                         .iter()
                         .any(|e| e.id == slot.config.endpoint_id && e.is_bluetooth()),
                     warning: if running {
-                        latency_warning(self.mode, estimated_latency_ms)
+                        latency_warning(
+                            self.mode,
+                            estimated_latency_ms,
+                            f64::from(slot.config.delay_ms)
+                                + f64::from(slot.controls.align_frames()) * 1_000.0
+                                    / f64::from(rate),
+                        )
                     } else {
                         None
                     },

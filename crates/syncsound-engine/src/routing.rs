@@ -101,10 +101,20 @@ pub fn alignment_frames(device_latency_frames: &[Option<u64>], sample_rate: u32)
 }
 
 /// Gaming mode warning when an output's estimated latency exceeds the budget.
-pub fn latency_warning(mode: AudioMode, estimated_ms: f64) -> Option<String> {
+/// Gaming mode warning when the latency SyncSound itself adds (buffer + endpoint)
+/// exceeds the budget. Delay the user dialled in on purpose, and automatic
+/// alignment delay, are excluded: they are intentional, not a fault.
+pub fn latency_warning(
+    mode: AudioMode,
+    estimated_ms: f64,
+    intentional_delay_ms: f64,
+) -> Option<String> {
     let budget = mode.policy().latency_warning_ms?;
-    (estimated_ms > f64::from(budget)).then(|| {
-        format!("Estimated latency {estimated_ms:.0} ms exceeds the Gaming budget of {budget} ms")
+    let added = (estimated_ms - intentional_delay_ms).max(0.0);
+    (added > f64::from(budget)).then(|| {
+        format!(
+            "SyncSound adds an estimated {added:.0} ms here (not counting your delay), over the Gaming budget of {budget} ms"
+        )
     })
 }
 
@@ -136,8 +146,16 @@ mod tests {
 
     #[test]
     fn gaming_budget_warns_only_in_gaming_mode() {
-        assert!(latency_warning(AudioMode::Gaming, 75.0).is_some());
-        assert!(latency_warning(AudioMode::Gaming, 30.0).is_none());
-        assert!(latency_warning(AudioMode::Synchronized, 500.0).is_none());
+        assert!(latency_warning(AudioMode::Gaming, 75.0, 0.0).is_some());
+        assert!(latency_warning(AudioMode::Gaming, 30.0, 0.0).is_none());
+        assert!(latency_warning(AudioMode::Synchronized, 500.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn deliberate_delay_does_not_trigger_gaming_warning() {
+        // Realtek case: 254 ms manual delay + ~30 ms SyncSound latency.
+        assert!(latency_warning(AudioMode::Gaming, 284.0, 254.0).is_none());
+        assert!(latency_warning(AudioMode::Gaming, 340.0, 254.0).is_some());
+        assert!(latency_warning(AudioMode::Gaming, 10.0, 254.0).is_none());
     }
 }

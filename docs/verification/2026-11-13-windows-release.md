@@ -7,7 +7,7 @@ SyncSound v0.1.0, **developer preview**. Host: Windows 11 Pro build 26300, Rust 
 | Command | Result |
 |---|---|
 | `npm ci`, `npm run build` | Passed |
-| `cargo test --workspace` | 65 passed (56 engine unit + 9 portable capture), 4 hardware tests ignored by default |
+| `cargo test --workspace` | 66 passed (57 engine unit + 9 portable capture), 4 hardware tests ignored by default |
 | `cargo check --workspace` | Passed |
 | `npm run desktop:build` | Passed; produced both bundles |
 
@@ -15,10 +15,10 @@ Artifacts (unsigned):
 
 | File | Size | SHA256 |
 |---|---|---|
-| `target/release/bundle/nsis/SyncSound_0.1.0_x64-setup.exe` | 2,121,532 B | `C9E011E886BFA4415C537A52735E3EFB40F874629DBD48208207F4E976B2EA69` |
-| `target/release/bundle/msi/SyncSound_0.1.0_x64_en-US.msi` | 3,203,072 B | `C0E9C3166A6F5A3722C41E174B11E33BECACD7C6FE3A5E912C8E1607EA20AAC8` |
+| `target/release/bundle/nsis/SyncSound_0.1.0_x64-setup.exe` | 2,146,156 B | `5DB44D842E238833739440572B03B2A9131F34904363DADC3876C2CF0811A316` |
+| `target/release/bundle/msi/SyncSound_0.1.0_x64_en-US.msi` | 3,231,744 B | `7876A3F4B00F14123A79AC9A74F117E0218FDF04232AD6CF3C382E831AC3B2BE` |
 
-These hashes are for the rebuild after the Bluetooth fixes below. The rebuild passed `install-windows.ps1 -Upgrade` again.
+These hashes are for the latest rebuild (single-instance, warning, and profile-name fixes). The rebuild passed `install-windows.ps1 -Upgrade` again.
 
 ## Native hardware smoke tests (outputs muted)
 
@@ -62,9 +62,14 @@ The user set the Windows default output to 34E6UC (monitor speakers turned down)
 | 330 ms | Two arrivals 76 ms apart; Realtek (the stronger one) was the later of the two |
 | 254 ms | One dominant arrival (43× noise). The weaker iOX 2 arrival is within about 10–18 ms of it, too close to hear as an echo |
 
-Saved as the profile `Front Realtek Rear iOX 2`: Gaming mode, source = Windows default, iOX 2 at 0 ms, Realtek at 254 ms. Total delay from the original playback is roughly 350 ms, so this setup suits music better than video or games.
+Saved as the profile `Front Realtek Rear iOX 2`: source = Windows default, iOX 2 at 0 ms, Realtek at 254 ms. It was first saved in Gaming mode, then re-saved as **Balanced** (see below). Total delay from the original playback is roughly 350 ms, so this setup suits music better than video or games.
 
-Also found: the installed app allows a second instance to run, and both instances can mirror audio at the same time.
+### Follow-up fixes (verified on the installed build)
+
+- **Single instance:** a second launch focuses the existing window. Launching the app twice left 1 `syncsound-desktop` process.
+- **Gaming warning:** it now excludes manual and alignment delay. Realtek at 254 ms delay no longer shows the warning.
+- **Profile names:** `+ & ( ) ,` are now allowed. Invalid names are flagged inline and Save is disabled; save and load results appear next to the profile controls.
+- **Gaming mode underruns on Bluetooth:** with the 20 ms buffer, the iOX 2 underran about 5 times per second (69 in about 13 s) while Realtek had none. Balanced (40 ms) held the count steady over 15 s. Both outputs get the same +20 ms, so their alignment is unchanged by design, but this was **not re-measured** acoustically.
 
 ## Install at F:\SyncSound
 

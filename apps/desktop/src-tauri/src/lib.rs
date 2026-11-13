@@ -223,6 +223,15 @@ async fn export_diagnostics(
 
 pub fn run() {
     let app = tauri::Builder::default()
+        // Must be registered first. A second launch would start a second engine
+        // mirroring the same audio, so it focuses the existing window and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .setup(|app| {
             // Profiles and diagnostics live in per-user app data, never the install dir.
             let data = app.path().app_data_dir()?;

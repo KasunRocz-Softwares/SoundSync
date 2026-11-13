@@ -79,13 +79,14 @@ pub fn validate_name(name: &str) -> Result<(), CommandError> {
         && name.trim() == name
         && name
             .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'));
+            // All are valid in Windows file names; no '.', '/', '\' or ':' (no traversal).
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '+' | '&' | '(' | ')' | ','));
     if ok {
         Ok(())
     } else {
         Err(CommandError::new(
             "invalid_profile_name",
-            "Profile names use 1–64 letters, digits, spaces, '-' or '_'",
+            "Profile names use 1–64 letters, digits, spaces and - _ + & ( ) ,",
         ))
     }
 }
@@ -421,6 +422,10 @@ mod tests {
         dup.outputs[1].endpoint_id = "id-a".into();
         assert!(Profile::from_json(&dup.to_json()).is_err());
         assert!(validate_name("../evil").is_err());
+        assert!(validate_name(r"a\b").is_err());
+        assert!(validate_name("C:x").is_err());
+        assert!(validate_name("Front Realtek + Rear iOX 2").is_ok());
+        assert!(validate_name("Desk (music), late & quiet").is_ok());
         assert!(validate_name(" padded").is_err());
     }
 
