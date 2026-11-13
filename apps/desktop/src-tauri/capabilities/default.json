@@ -1,1 +1,27 @@
-{"identifier":"default","description":"Main SyncSound window","windows":["main"],"permissions":["core:default"]}
+{
+  "identifier": "default",
+  "description": "Main SyncSound window: core APIs plus the SyncSound engine commands only",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-get-audio-devices",
+    "allow-get-engine-status",
+    "allow-start-audio-engine",
+    "allow-stop-audio-engine",
+    "allow-select-capture-source",
+    "allow-enable-device",
+    "allow-disable-device",
+    "allow-set-device-volume",
+    "allow-set-device-mute",
+    "allow-set-device-delay",
+    "allow-set-audio-mode",
+    "allow-get-sync-metrics",
+    "allow-save-profile",
+    "allow-load-profile",
+    "allow-list-profiles",
+    "allow-rebind-profile-device",
+    "allow-export-diagnostics"
+  ]
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-select-capture-source"
+description = "Enables the select_capture_source command without any pre-configured scope."
+commands.allow = ["select_capture_source"]
+
+[[permission]]
+identifier = "deny-select-capture-source"
+description = "Denies the select_capture_source command without any pre-configured scope."
+commands.deny = ["select_capture_source"]

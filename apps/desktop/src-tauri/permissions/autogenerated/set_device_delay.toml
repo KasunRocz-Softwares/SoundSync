@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-device-delay"
+description = "Enables the set_device_delay command without any pre-configured scope."
+commands.allow = ["set_device_delay"]
+
+[[permission]]
+identifier = "deny-set-device-delay"
+description = "Denies the set_device_delay command without any pre-configured scope."
+commands.deny = ["set_device_delay"]

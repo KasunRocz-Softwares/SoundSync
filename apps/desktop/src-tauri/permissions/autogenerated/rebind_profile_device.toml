@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rebind-profile-device"
+description = "Enables the rebind_profile_device command without any pre-configured scope."
+commands.allow = ["rebind_profile_device"]
+
+[[permission]]
+identifier = "deny-rebind-profile-device"
+description = "Denies the rebind_profile_device command without any pre-configured scope."
+commands.deny = ["rebind_profile_device"]

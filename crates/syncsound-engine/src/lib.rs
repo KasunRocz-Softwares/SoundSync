@@ -6,10 +6,13 @@
 //! is not an acoustic measurement and never claims zero latency.
 pub mod audio_format;
 pub mod capture;
+pub mod commands;
+pub mod diagnostics;
 pub mod dsp;
 pub mod metrics;
 pub mod output_state;
 pub mod platform;
+pub mod profile;
 pub mod render;
 pub mod ring_buffer;
 pub mod routing;

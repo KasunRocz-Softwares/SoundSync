@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-enable-device"
+description = "Enables the enable_device command without any pre-configured scope."
+commands.allow = ["enable_device"]
+
+[[permission]]
+identifier = "deny-enable-device"
+description = "Denies the enable_device command without any pre-configured scope."
+commands.deny = ["enable_device"]
