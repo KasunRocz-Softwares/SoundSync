@@ -1,0 +1,7 @@
+# Every change needs a review from the maintainer before it can merge into main.
+*                   @KasunRoczDev
+
+# Release, signing and CI files are the most sensitive.
+/.github/           @KasunRoczDev
+/.signpath/         @KasunRoczDev
+/scripts/           @KasunRoczDev
