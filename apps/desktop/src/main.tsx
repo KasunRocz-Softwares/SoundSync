@@ -9,6 +9,7 @@ import {
   type AudioEndpoint, type AudioMode, type CaptureSource, type CaptureState, type ChannelRole, type EngineSnapshot,
   type LifecycleState, type OutputStatus, type ProfileLoadReport, type SoundPreset, type SpeakerPosition,
 } from './types';
+import { RoomMap } from './RoomMap';
 import './style.css';
 
 const MODES: { id: AudioMode; label: string; detail: string }[] = [
@@ -321,6 +322,7 @@ function App() {
             <span>{ROLES.find(r => r.id === o.config.role)?.label}{o.config.distance_m != null && `, ${o.config.distance_m} m`}{o.config.trim_db !== 0 && `, ${o.config.trim_db} dB`}</span>
           </li>)}
         </ul>}
+        <RoomMap snapshot={snapshot} act={act} />
       </section>
 
       <div className="section-head"><h2>Outputs</h2><span>{enabledCount} / {MAX_ENABLED_OUTPUTS} enabled · {active.length} available</span></div>

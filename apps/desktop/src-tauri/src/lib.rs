@@ -10,6 +10,9 @@ use syncsound_engine::commands::{
 use syncsound_engine::placement::{validate_distance, validate_trim, SoundPreset, SpeakerPosition};
 use syncsound_engine::profile::{MissingOutput, Profile, ProfileStore};
 use syncsound_engine::render::{AudioMode, ChannelRole};
+use syncsound_engine::spatial::{
+    validate_azimuth, validate_spatial, SourceLayout, SpatialConfig, StereoSpread,
+};
 use syncsound_engine::{diagnostics, AudioEngine, EngineError, EngineSnapshot, OutputStatus};
 use tauri::{Manager, State};
 
@@ -173,6 +176,63 @@ async fn apply_sound_preset(preset: String, state: State<'_, AppState>) -> CmdRe
         .map_err(|e| CommandError::new("invalid_preset", e.to_string()))
 }
 
+/// Room-map drag: angle (0 = front, + = right) and optional distance.
+#[tauri::command]
+async fn set_device_map_placement(
+    id: String,
+    azimuth_deg: f64,
+    distance_m: Option<f64>,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    let azimuth = validate_azimuth(azimuth_deg)?;
+    let distance = distance_m.map(validate_distance).transpose()?;
+    state
+        .engine
+        .set_map_placement(id, azimuth, distance)
+        .map_err(engine_error)
+}
+
+#[tauri::command]
+async fn set_device_spread(
+    id: String,
+    spread: String,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    let spread: StereoSpread = parse_enum(&spread, "invalid_spread")?;
+    state.engine.set_spread(id, spread).map_err(engine_error)
+}
+
+#[tauri::command]
+async fn set_device_subwoofer(id: String, on: bool, state: State<'_, AppState>) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    state.engine.set_subwoofer(id, on).map_err(engine_error)
+}
+
+/// Spatial mode: room-map panning, stereo or 7.1 upmix, optional 8D rotation.
+#[tauri::command]
+async fn set_spatial(
+    enabled: bool,
+    layout: String,
+    rotation_s: Option<f64>,
+    clockwise: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    let layout: SourceLayout = parse_enum(&layout, "invalid_layout")?;
+    let config = SpatialConfig {
+        enabled,
+        layout,
+        rotation_s: rotation_s.map(|s| s as f32),
+        clockwise,
+    };
+    validate_spatial(&config)?;
+    state.engine.set_spatial(config).map_err(engine_error)
+}
+
 #[derive(Serialize)]
 struct SyncMetrics {
     running: bool,
@@ -225,6 +285,10 @@ async fn load_profile(name: String, state: State<'_, AppState>) -> CmdResult<Pro
     state
         .engine
         .set_distance_compensation(plan.distance_compensation)
+        .map_err(engine_error)?;
+    state
+        .engine
+        .set_spatial(plan.spatial)
         .map_err(engine_error)?;
     if let Some(source) = plan.source.clone() {
         state.engine.set_source(source).map_err(engine_error)?;
@@ -325,7 +389,11 @@ pub fn run() {
             set_device_role,
             set_device_trim,
             set_distance_compensation,
-            apply_sound_preset
+            apply_sound_preset,
+            set_device_map_placement,
+            set_device_spread,
+            set_device_subwoofer,
+            set_spatial
         ])
         .build(tauri::generate_context!())
         .expect("error while building SyncSound");

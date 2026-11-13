@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpeakerPosition,
+  AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpatialConfig,
+  SpeakerPosition, StereoSpread,
 } from './types';
 
 export function errorMessage(error: unknown): string {
@@ -35,4 +36,10 @@ export const api = {
   trim: (id: string, trimDb: number) => invoke<void>('set_device_trim', { id, trimDb }),
   distanceCompensation: (enabled: boolean) => invoke<void>('set_distance_compensation', { enabled }),
   preset: (preset: SoundPreset) => invoke<void>('apply_sound_preset', { preset }),
+  mapPlacement: (id: string, azimuthDeg: number, distanceM: number | null) =>
+    invoke<void>('set_device_map_placement', { id, azimuthDeg, distanceM }),
+  spread: (id: string, spread: StereoSpread) => invoke<void>('set_device_spread', { id, spread }),
+  subwoofer: (id: string, on: boolean) => invoke<void>('set_device_subwoofer', { id, on }),
+  spatial: (c: SpatialConfig) =>
+    invoke<void>('set_spatial', { enabled: c.enabled, layout: c.layout, rotationS: c.rotation_s, clockwise: c.clockwise }),
 };

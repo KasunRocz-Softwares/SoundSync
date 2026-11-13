@@ -3,6 +3,7 @@
 //! encoding. The Windows worker calls `RenderPipeline::render` from its event loop;
 //! that call never allocates, locks, logs, blocks, or performs I/O.
 use crate::dsp::DspError;
+use crate::spatial::{virtual_channels, GainMatrix, LowPass, SpatialShared, MAX_VIRTUAL};
 use crate::{PcmConsumer, PcmFormat};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicU8, Ordering};
@@ -150,6 +151,9 @@ pub struct OutputControls {
     placement_delay_frames: AtomicU32,
     trim_bits: AtomicU32,
     role: AtomicU8,
+    /// Index among spatial outputs (its points are 2·slot and 2·slot+1); 255 = none.
+    spatial_slot: AtomicU8,
+    subwoofer: AtomicBool,
 }
 
 impl OutputControls {
@@ -164,7 +168,23 @@ impl OutputControls {
             placement_delay_frames: AtomicU32::new(0),
             trim_bits: AtomicU32::new(1.0f32.to_bits()),
             role: AtomicU8::new(ChannelRole::Stereo.to_u8()),
+            spatial_slot: AtomicU8::new(u8::MAX),
+            subwoofer: AtomicBool::new(false),
         }
+    }
+    pub fn spatial_slot(&self) -> Option<usize> {
+        let slot = self.spatial_slot.load(Ordering::Relaxed);
+        (slot != u8::MAX).then_some(usize::from(slot))
+    }
+    pub fn set_spatial_slot(&self, slot: Option<usize>) {
+        let value = slot.map_or(u8::MAX, |s| s.min(254) as u8);
+        self.spatial_slot.store(value, Ordering::Relaxed);
+    }
+    pub fn subwoofer(&self) -> bool {
+        self.subwoofer.load(Ordering::Relaxed)
+    }
+    pub fn set_subwoofer(&self, on: bool) {
+        self.subwoofer.store(on, Ordering::Relaxed);
     }
     pub fn placement_delay_frames(&self) -> u32 {
         self.placement_delay_frames.load(Ordering::Relaxed)
@@ -332,6 +352,9 @@ pub struct RenderPipeline {
     gain: f32,
     controls: Arc<OutputControls>,
     metrics: Arc<OutputMetrics>,
+    spatial: Option<Arc<SpatialShared>>,
+    lfe: LowPass,
+    lfe_coefficient: f32,
 }
 
 impl RenderPipeline {
@@ -376,7 +399,16 @@ impl RenderPipeline {
             gain: controls.gain(),
             controls,
             metrics,
+            spatial: None,
+            lfe: LowPass::default(),
+            lfe_coefficient: LowPass::coefficient(format.sample_rate),
         })
+    }
+
+    /// Joins the shared spatial field (room map, 7.1 upmix, 8D rotation).
+    pub fn with_spatial(mut self, spatial: Arc<SpatialShared>) -> Self {
+        self.spatial = Some(spatial);
+        self
     }
 
     pub fn buffered_frames(&self) -> usize {
@@ -550,6 +582,32 @@ impl RenderPipeline {
             self.controls.gain() * self.controls.trim()
         };
         let role = self.controls.role();
+        // Spatial gains at the start and end of this callback, keyed to the
+        // source frame position so every output sees the same rotation.
+        let spatial = match (&self.spatial, self.controls.spatial_slot()) {
+            (Some(shared), Some(slot)) if shared.enabled() && self.channels == 2 => {
+                let read_frame = self
+                    .expected_next
+                    .unwrap_or(0)
+                    .saturating_sub(self.len as u64);
+                let rate = self.sample_rate;
+                let start = GainMatrix::compute(shared, slot, shared.rotation_at(read_frame, rate));
+                let end = GainMatrix::compute(
+                    shared,
+                    slot,
+                    shared.rotation_at(read_frame + frames_out as u64, rate),
+                );
+                Some((shared.layout(), start, end, self.controls.subwoofer()))
+            }
+            (Some(shared), None) if shared.enabled() && self.controls.subwoofer() => Some((
+                shared.layout(),
+                GainMatrix::default(),
+                GainMatrix::default(),
+                true,
+            )),
+            _ => None,
+        };
+        let mut virtual_frame = [0.0f32; MAX_VIRTUAL];
         let gain_step = if frames_out > 0 {
             (target_gain - self.gain) / frames_out as f32
         } else {
@@ -580,7 +638,29 @@ impl RenderPipeline {
                 let right = self.ring[b * ch + c];
                 out[c] = (left + (right - left) * fraction) * self.gain;
             }
-            role.apply(out);
+            match &spatial {
+                Some((_, _, _, true)) => {
+                    let mono = self
+                        .lfe
+                        .process(0.5 * (out[0] + out[1]), self.lfe_coefficient);
+                    out[0] = mono;
+                    out[1] = mono;
+                }
+                Some((layout, start, end, false)) => {
+                    let t = frame as f32 / frames_out.max(1) as f32;
+                    let n = virtual_channels(*layout, out[0], out[1], &mut virtual_frame);
+                    let (mut l, mut r) = (0.0, 0.0);
+                    for v in 0..n {
+                        let gl = start.left[v] + (end.left[v] - start.left[v]) * t;
+                        let gr = start.right[v] + (end.right[v] - start.right[v]) * t;
+                        l += gl * virtual_frame[v];
+                        r += gr * virtual_frame[v];
+                    }
+                    out[0] = l;
+                    out[1] = r;
+                }
+                None => role.apply(out),
+            }
             self.phase += ratio;
             while self.phase >= 1.0 && self.len > 0 {
                 self.phase -= 1.0;
@@ -968,6 +1048,38 @@ mod tests {
             "placement delay is held silence"
         );
         assert_eq!(pipeline.buffered_frames(), before);
+    }
+
+    #[test]
+    fn spatial_mode_pans_virtual_left_into_the_left_ear() {
+        use crate::spatial::{SourceLayout, SpatialConfig};
+        let shared = Arc::new(SpatialShared::default());
+        shared.set(
+            SpatialConfig {
+                enabled: true,
+                layout: SourceLayout::Stereo,
+                rotation_s: None,
+                clockwise: true,
+            },
+            &[-90.0, 90.0],
+        );
+        let (mut producer, pipeline, controls, _) = output(1.0, 0);
+        let mut pipeline = pipeline.with_spatial(shared.clone());
+        controls.set_spatial_slot(Some(0));
+        for i in 0..12u64 {
+            let samples: Vec<f32> = (0..480).flat_map(|_| [1.0, 0.0]).collect();
+            producer.push_samples(i * 480, &samples);
+        }
+        let mut out = vec![0.0; 480 * 2];
+        pipeline.render(&mut out);
+        // Virtual L (−30°) sits between the ears (−90°, +90°), nearer the left.
+        assert!(out[0] > out[1] && out[1] > 0.0, "{:?}", &out[..2]);
+        // Subwoofer output: low-passed mono.
+        controls.set_spatial_slot(None);
+        controls.set_subwoofer(true);
+        pipeline.render(&mut out);
+        let last = &out[out.len() - 2..];
+        assert!((last[0] - last[1]).abs() < 1e-6 && last[0] > 0.0);
     }
 
     #[test]

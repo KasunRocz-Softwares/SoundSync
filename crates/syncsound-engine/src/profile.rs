@@ -5,6 +5,7 @@ use crate::commands::{validate_delay, validate_volume, CommandError};
 use crate::placement::{validate_distance, validate_trim, SpeakerPosition};
 use crate::render::{AudioMode, ChannelRole, MAX_ENABLED_OUTPUTS};
 use crate::routing::{EngineSnapshot, OutputConfig};
+use crate::spatial::{validate_azimuth, validate_spatial, SpatialConfig, StereoSpread};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -50,6 +51,12 @@ pub struct ProfileOutput {
     pub distance_m: Option<f32>,
     #[serde(default)]
     pub trim_db: f32,
+    #[serde(default)]
+    pub azimuth_deg: Option<f32>,
+    #[serde(default)]
+    pub spread: StereoSpread,
+    #[serde(default)]
+    pub subwoofer: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -62,6 +69,8 @@ pub struct Profile {
     pub outputs: Vec<ProfileOutput>,
     #[serde(default = "default_compensation")]
     pub distance_compensation: bool,
+    #[serde(default)]
+    pub spatial: SpatialConfig,
 }
 
 impl ProfileOutput {
@@ -79,6 +88,9 @@ impl ProfileOutput {
             position: SpeakerPosition::Unassigned,
             distance_m: None,
             trim_db: 0.0,
+            azimuth_deg: None,
+            spread: StereoSpread::Point,
+            subwoofer: false,
         }
     }
 }
@@ -107,6 +119,7 @@ pub struct ProfileApplyPlan {
     pub outputs: Vec<OutputConfig>,
     pub missing: Vec<MissingOutput>,
     pub distance_compensation: bool,
+    pub spatial: SpatialConfig,
 }
 
 pub fn validate_name(name: &str) -> Result<(), CommandError> {
@@ -150,9 +163,13 @@ impl Profile {
                     position: o.config.position,
                     distance_m: o.config.distance_m,
                     trim_db: o.config.trim_db,
+                    azimuth_deg: o.config.azimuth_deg,
+                    spread: o.config.spread,
+                    subwoofer: o.config.subwoofer,
                 })
                 .collect(),
             distance_compensation: snapshot.distance_compensation,
+            spatial: snapshot.spatial,
         };
         profile.validate()?;
         Ok(profile)
@@ -166,6 +183,7 @@ impl Profile {
                 "Unsupported profile version",
             ));
         }
+        validate_spatial(&self.spatial)?;
         if self.outputs.len() > MAX_PROFILE_OUTPUTS {
             return Err(CommandError::new(
                 "invalid_profile",
@@ -195,6 +213,9 @@ impl Profile {
                 validate_distance(f64::from(distance))?;
             }
             validate_trim(f64::from(output.trim_db))?;
+            if let Some(azimuth) = output.azimuth_deg {
+                validate_azimuth(f64::from(azimuth))?;
+            }
         }
         Ok(())
     }
@@ -261,6 +282,9 @@ impl Profile {
                     position: output.position,
                     distance_m: output.distance_m,
                     trim_db: output.trim_db,
+                    azimuth_deg: output.azimuth_deg,
+                    spread: output.spread,
+                    subwoofer: output.subwoofer,
                 });
             } else {
                 missing.push(MissingOutput {
@@ -277,6 +301,7 @@ impl Profile {
             outputs,
             missing,
             distance_compensation: self.distance_compensation,
+            spatial: self.spatial,
         }
     }
 
@@ -403,6 +428,7 @@ mod tests {
             mode: AudioMode::Synchronized,
             source: ProfileSource::SystemExcludingSelf,
             distance_compensation: true,
+            spatial: SpatialConfig::default(),
             outputs: vec![
                 ProfileOutput {
                     endpoint_id: "id-a".into(),

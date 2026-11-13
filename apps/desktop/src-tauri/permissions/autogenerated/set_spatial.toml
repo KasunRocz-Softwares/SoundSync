@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-spatial"
+description = "Enables the set_spatial command without any pre-configured scope."
+commands.allow = ["set_spatial"]
+
+[[permission]]
+identifier = "deny-set-spatial"
+description = "Denies the set_spatial command without any pre-configured scope."
+commands.deny = ["set_spatial"]

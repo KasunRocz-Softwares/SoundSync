@@ -15,6 +15,10 @@ use crate::routing::{
     alignment_frames, latency_warning, metrics_ms, EngineSnapshot, ErrorRecord, OutputConfig,
     OutputStatus,
 };
+use crate::spatial::{
+    nearest_position, position_azimuth, wrap_deg, SpatialConfig, SpatialShared, StereoSpread,
+    MAX_POINTS,
+};
 use crate::{BoundedPcmQueue, PcmConsumer, PcmFormat, PcmProducer, QueueStatus};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::Ordering;
@@ -58,6 +62,10 @@ enum Command {
     SetRole(String, ChannelRole, Reply<()>),
     SetTrim(String, f32, Reply<()>),
     SetCompensation(bool, Reply<()>),
+    SetMapPlacement(String, f32, Option<f32>, Reply<()>),
+    SetSpread(String, StereoSpread, Reply<()>),
+    SetSubwoofer(String, bool, Reply<()>),
+    SetSpatial(SpatialConfig, Reply<()>),
     ApplyPreset(SoundPreset, Reply<()>),
     Refresh(Reply<Vec<AudioEndpoint>>),
     Shutdown,
@@ -169,6 +177,24 @@ impl AudioEngine {
     pub fn set_trim(&self, id: String, trim_db: f32) -> Result<(), EngineError> {
         self.call(|r| Command::SetTrim(id, trim_db, r))
     }
+    /// Room-map drag: exact angle and distance; the named position snaps to the nearest one.
+    pub fn set_map_placement(
+        &self,
+        id: String,
+        azimuth: f32,
+        distance_m: Option<f32>,
+    ) -> Result<(), EngineError> {
+        self.call(|r| Command::SetMapPlacement(id, azimuth, distance_m, r))
+    }
+    pub fn set_spread(&self, id: String, spread: StereoSpread) -> Result<(), EngineError> {
+        self.call(|r| Command::SetSpread(id, spread, r))
+    }
+    pub fn set_subwoofer(&self, id: String, on: bool) -> Result<(), EngineError> {
+        self.call(|r| Command::SetSubwoofer(id, on, r))
+    }
+    pub fn set_spatial(&self, config: SpatialConfig) -> Result<(), EngineError> {
+        self.call(|r| Command::SetSpatial(config, r))
+    }
     pub fn set_distance_compensation(&self, enabled: bool) -> Result<(), EngineError> {
         self.call(|r| Command::SetCompensation(enabled, r))
     }
@@ -202,6 +228,8 @@ struct Core {
     mode: AudioMode,
     source: CaptureSource,
     distance_compensation: bool,
+    spatial_config: SpatialConfig,
+    spatial: Arc<SpatialShared>,
     running: bool,
     endpoints: Vec<AudioEndpoint>,
     outputs: BTreeMap<String, OutputSlot>,
@@ -227,6 +255,8 @@ impl Core {
             mode: AudioMode::default(),
             source: CaptureSource::default(),
             distance_compensation: true,
+            spatial_config: SpatialConfig::default(),
+            spatial: Arc::new(SpatialShared::default()),
             running: false,
             endpoints,
             outputs: BTreeMap::new(),
@@ -400,6 +430,23 @@ impl Core {
             Command::SetTrim(id, trim_db, reply) => {
                 let _ = reply.send(self.slot(&id).map(|s| s.config.trim_db = trim_db));
             }
+            Command::SetMapPlacement(id, azimuth, distance_m, reply) => {
+                let _ = reply.send(self.slot(&id).map(|s| {
+                    s.config.azimuth_deg = Some(azimuth);
+                    s.config.position = nearest_position(azimuth);
+                    s.config.distance_m = distance_m;
+                }));
+            }
+            Command::SetSpread(id, spread, reply) => {
+                let _ = reply.send(self.slot(&id).map(|s| s.config.spread = spread));
+            }
+            Command::SetSubwoofer(id, on, reply) => {
+                let _ = reply.send(self.slot(&id).map(|s| s.config.subwoofer = on));
+            }
+            Command::SetSpatial(config, reply) => {
+                self.spatial_config = config;
+                let _ = reply.send(Ok(()));
+            }
             Command::SetCompensation(enabled, reply) => {
                 self.distance_compensation = enabled;
                 let _ = reply.send(Ok(()));
@@ -440,6 +487,31 @@ impl Core {
             slot.controls
                 .set_placement_delay_frames(placement.delay_frames);
         }
+        // Spatial field: every enabled, non-subwoofer output gets a slot and two
+        // points (its left and right channel) around its map angle.
+        let mut points = Vec::with_capacity(MAX_POINTS);
+        let mut next = 0;
+        for slot in self.outputs.values() {
+            let config = &slot.config;
+            let azimuth = config
+                .azimuth_deg
+                .or_else(|| position_azimuth(config.position));
+            slot.controls
+                .set_subwoofer(config.enabled && config.subwoofer);
+            match azimuth {
+                Some(az)
+                    if config.enabled && !config.subwoofer && points.len() + 2 <= MAX_POINTS =>
+                {
+                    let half = config.spread.half_angle();
+                    points.push(wrap_deg(az - half));
+                    points.push(wrap_deg(az + half));
+                    slot.controls.set_spatial_slot(Some(next));
+                    next += 1;
+                }
+                _ => slot.controls.set_spatial_slot(None),
+            }
+        }
+        self.spatial.set(self.spatial_config, &points);
     }
 
     fn enable(&mut self, id: &str) -> Result<(), EngineError> {
@@ -583,7 +655,7 @@ impl Core {
             slot.controls.clone(),
             slot.metrics.clone(),
         ) {
-            Ok(pipeline) => pipeline,
+            Ok(pipeline) => pipeline.with_spatial(self.spatial.clone()),
             Err(_) => {
                 slot.lifecycle
                     .failed(Instant::now(), "Invalid render pipeline");
@@ -759,6 +831,10 @@ impl Core {
                     placement_delay_ms: f64::from(slot.controls.placement_delay_frames()) * 1_000.0
                         / f64::from(rate),
                     placement_level: slot.controls.trim(),
+                    resolved_azimuth: slot
+                        .config
+                        .azimuth_deg
+                        .or_else(|| position_azimuth(slot.config.position)),
                     buffered_ms,
                     device_latency_ms,
                     estimated_latency_ms,
@@ -794,6 +870,7 @@ impl Core {
             capture_format: self.format,
             outputs,
             distance_compensation: self.distance_compensation,
+            spatial: self.spatial_config,
             endpoints: self.endpoints.clone(),
             recent_errors: self.errors.iter().cloned().collect(),
             updated_at_ms: self.started.elapsed().as_millis() as u64,

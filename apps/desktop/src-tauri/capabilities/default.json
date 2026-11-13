@@ -27,6 +27,10 @@
     "allow-set-device-role",
     "allow-set-device-trim",
     "allow-set-distance-compensation",
-    "allow-apply-sound-preset"
+    "allow-apply-sound-preset",
+    "allow-set-device-map-placement",
+    "allow-set-device-spread",
+    "allow-set-device-subwoofer",
+    "allow-set-spatial"
   ]
 }

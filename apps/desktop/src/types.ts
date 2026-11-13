@@ -30,10 +30,14 @@ export type ChannelRole = 'stereo' | 'swapped' | 'left_only' | 'right_only' | 'm
 export type SpeakerPosition =
   | 'unassigned' | 'front_left' | 'front' | 'front_right' | 'left' | 'right' | 'rear_left' | 'rear' | 'rear_right';
 export type SoundPreset = 'stereo' | 'front_rear' | 'left_right_split' | 'party_mono';
+export type StereoSpread = 'point' | 'narrow' | 'wide' | 'headphones';
+export type SourceLayout = 'stereo' | 'upmix71';
+export type SpatialConfig = { enabled: boolean; layout: SourceLayout; rotation_s: number | null; clockwise: boolean };
 
 export type OutputConfig = {
   endpoint_id: string; enabled: boolean; gain: number; muted: boolean; delay_ms: number;
   role: ChannelRole; position: SpeakerPosition; distance_m: number | null; trim_db: number;
+  azimuth_deg: number | null; spread: StereoSpread; subwoofer: boolean;
 };
 
 export type OutputMetrics = {
@@ -60,6 +64,7 @@ export type OutputStatus = {
   align_ms: number;
   placement_delay_ms: number;
   placement_level: number;
+  resolved_azimuth: number | null;
   buffered_ms: number;
   device_latency_ms: number;
   estimated_latency_ms: number;
@@ -78,6 +83,7 @@ export type EngineSnapshot = {
   capture_format: PcmFormat;
   outputs: OutputStatus[];
   distance_compensation: boolean;
+  spatial: SpatialConfig;
   endpoints: AudioEndpoint[];
   recent_errors: ErrorRecord[];
   updated_at_ms: number;

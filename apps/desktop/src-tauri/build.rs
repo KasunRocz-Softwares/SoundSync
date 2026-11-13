@@ -23,6 +23,10 @@ const COMMANDS: &[&str] = &[
     "set_device_trim",
     "set_distance_compensation",
     "apply_sound_preset",
+    "set_device_map_placement",
+    "set_device_spread",
+    "set_device_subwoofer",
+    "set_spatial",
 ];
 
 fn main() {

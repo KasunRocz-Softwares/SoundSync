@@ -4,6 +4,7 @@ use crate::capture::{AudioEndpoint, CaptureSource, CaptureState};
 use crate::output_state::OutputLifecycleState;
 use crate::placement::SpeakerPosition;
 use crate::render::{frames_to_ms, AudioMode, ChannelRole, OutputMetricsSnapshot, MAX_ALIGN_MS};
+use crate::spatial::{SpatialConfig, StereoSpread};
 use crate::PcmFormat;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,14 @@ pub struct OutputConfig {
     /// Level trim in dB (≤ 0), e.g. −3 dB for rear speakers.
     #[serde(default)]
     pub trim_db: f32,
+    /// Exact angle on the room map (0 = front, + = right). None = from `position`.
+    #[serde(default)]
+    pub azimuth_deg: Option<f32>,
+    #[serde(default)]
+    pub spread: StereoSpread,
+    /// Receives the low-passed LFE feed in spatial mode instead of the panned mix.
+    #[serde(default)]
+    pub subwoofer: bool,
 }
 
 impl OutputConfig {
@@ -38,6 +47,9 @@ impl OutputConfig {
             position: SpeakerPosition::Unassigned,
             distance_m: None,
             trim_db: 0.0,
+            azimuth_deg: None,
+            spread: StereoSpread::Point,
+            subwoofer: false,
         }
     }
 }
@@ -59,6 +71,9 @@ pub struct OutputStatus {
     /// Linear level from distance compensation × trim.
     #[serde(default = "unity")]
     pub placement_level: f32,
+    /// Angle used for spatial rendering (explicit map angle or the position's angle).
+    #[serde(default)]
+    pub resolved_azimuth: Option<f32>,
     pub buffered_ms: f64,
     /// Windows-reported endpoint buffer + stream latency. Excludes Bluetooth/HDMI
     /// transport and acoustic delays Windows does not report.
@@ -87,6 +102,7 @@ pub struct EngineSnapshot {
     pub capture_format: PcmFormat,
     pub outputs: Vec<OutputStatus>,
     pub distance_compensation: bool,
+    pub spatial: SpatialConfig,
     pub endpoints: Vec<AudioEndpoint>,
     pub recent_errors: Vec<ErrorRecord>,
     pub updated_at_ms: u64,
@@ -102,6 +118,7 @@ impl EngineSnapshot {
             capture_format: format,
             outputs: Vec::new(),
             distance_compensation: true,
+            spatial: SpatialConfig::default(),
             endpoints: Vec::new(),
             recent_errors: Vec::new(),
             updated_at_ms: 0,
