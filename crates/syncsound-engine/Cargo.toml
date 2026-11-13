@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cpal = "0.15"
+
 crossbeam-queue = "0.3"
 serde.workspace = true
 thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Devices_FunctionDiscovery", "Win32_System_Variant", "Win32_Media_KernelStreaming"] }
+windows = { workspace = true, features = ["Win32_Devices_FunctionDiscovery", "Win32_System_Variant", "Win32_Media_KernelStreaming", "Win32_System_Threading", "Win32_Security"] }
 windows-core = "0.62"

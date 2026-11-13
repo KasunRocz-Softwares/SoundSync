@@ -41,9 +41,9 @@ pub enum CaptureError {
 }
 
 // Declared last in owners, so every interface is released before CoUninitialize.
-struct Apartment(PhantomData<Rc<()>>);
+pub(crate) struct Apartment(PhantomData<Rc<()>>);
 impl Apartment {
-    fn new() -> Result<Self, CaptureError> {
+    pub(crate) fn new() -> Result<Self, CaptureError> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
         }
@@ -58,7 +58,7 @@ impl Drop for Apartment {
     }
 }
 
-struct ComMemory<T>(*mut T);
+pub(crate) struct ComMemory<T>(pub(crate) *mut T);
 impl<T> Drop for ComMemory<T> {
     fn drop(&mut self) {
         unsafe {
@@ -77,7 +77,7 @@ fn device_id(device: &IMMDevice) -> windows::core::Result<String> {
 
 #[implement(IMMNotificationClient)]
 struct Notifications {
-    changed: Arc<AtomicBool>,
+    pub(crate) changed: Arc<AtomicBool>,
 }
 impl IMMNotificationClient_Impl for Notifications_Impl {
     fn OnDeviceStateChanged(&self, _: &PCWSTR, _: DEVICE_STATE) -> windows::core::Result<()> {
@@ -112,9 +112,9 @@ impl IMMNotificationClient_Impl for Notifications_Impl {
 /// Enumerates all render endpoints, including disabled/unplugged devices.
 /// The default role is eConsole, used consistently by discovery and notifications.
 pub struct EndpointCatalog {
-    enumerator: IMMDeviceEnumerator,
+    pub(crate) enumerator: IMMDeviceEnumerator,
     notifications: IMMNotificationClient,
-    changed: Arc<AtomicBool>,
+    pub(crate) changed: Arc<AtomicBool>,
     _apartment: Apartment,
 }
 
