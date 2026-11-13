@@ -8,7 +8,7 @@ pub mod timeline;
 
 pub use audio_format::{PcmBlock, PcmFormat};
 pub use dsp::{map_channels, resample_interleaved, DelayLine};
-pub use ring_buffer::{BoundedPcmQueue, QueueStatus};
+pub use ring_buffer::{BoundedPcmQueue, PcmConsumer, PcmProducer, QueueStatus};
 pub use timeline::{ClockEstimator, MasterTimeline};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};

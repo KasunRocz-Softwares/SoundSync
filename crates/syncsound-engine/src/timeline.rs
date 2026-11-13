@@ -47,16 +47,17 @@ impl MasterTimeline {
     }
 }
 
-/// Observes two independent monotonically increasing frame clocks. Outliers above
-/// 1000 ppm are ignored; the accepted estimate can be larger than the correction
-/// limit, which is clamped to avoid abrupt speed changes.
+/// Observes two independent monotonically increasing frame clocks. Each estimate
+/// spans at least 48,000 master frames so callback-sized integer rounding does
+/// not alias a small drift into 0 or thousands of ppm. Outliers above 1000 ppm
+/// are ignored. Correction is clamped and slews by at most 50 ppm per estimate.
 #[derive(Clone, Copy, Debug)]
 pub struct ClockEstimator {
     max_correction_ppm: f64,
-    last: Option<(u64, u64)>,
+    window_start: Option<(u64, u64)>,
+    last_seen: Option<(u64, u64)>,
     ppm: f64,
     applied_ppm: f64,
-    has_estimate: bool,
 }
 
 impl ClockEstimator {
@@ -69,51 +70,56 @@ impl ClockEstimator {
         }
         Some(Self {
             max_correction_ppm,
-            last: None,
+            window_start: None,
+            last_seen: None,
             ppm: 0.0,
             applied_ppm: 0.0,
-            has_estimate: false,
         })
     }
 
     pub fn reset(&mut self) {
-        self.last = None;
+        self.window_start = None;
+        self.last_seen = None;
         self.ppm = 0.0;
         self.applied_ppm = 0.0;
-        self.has_estimate = false;
     }
     pub fn ppm(&self) -> f64 {
         self.ppm
     }
 
     pub fn observe(&mut self, master_frame: u64, device_frame: u64) -> bool {
-        let Some((last_master, last_device)) = self.last else {
-            self.last = Some((master_frame, device_frame));
+        let Some((start_master, start_device)) = self.window_start else {
+            self.window_start = Some((master_frame, device_frame));
+            self.last_seen = Some((master_frame, device_frame));
             return true;
         };
+        if let Some((last_master, last_device)) = self.last_seen {
+            if master_frame <= last_master || device_frame < last_device {
+                return false;
+            }
+        }
         let (Some(master_delta), Some(device_delta)) = (
-            master_frame.checked_sub(last_master),
-            device_frame.checked_sub(last_device),
+            master_frame.checked_sub(start_master),
+            device_frame.checked_sub(start_device),
         ) else {
             return false;
         };
-        if master_delta == 0 || device_delta == 0 {
+        if device_delta == 0 {
             return false;
         }
-        let ppm = (device_delta as f64 / master_delta as f64 - 1.0) * 1_000_000.0;
+        if master_delta < 48_000 {
+            self.last_seen = Some((master_frame, device_frame));
+            return true;
+        }
+        let ppm = (device_delta as f64 - master_delta as f64) / master_delta as f64 * 1_000_000.0;
         if !ppm.is_finite() || ppm.abs() > 1_000.0 {
             return false;
         }
         self.ppm = ppm;
         let target = ppm.clamp(-self.max_correction_ppm, self.max_correction_ppm);
-        if self.has_estimate {
-            // At most 50 ppm of correction change per accepted observation.
-            self.applied_ppm += (target - self.applied_ppm).clamp(-50.0, 50.0);
-        } else {
-            self.applied_ppm = target;
-            self.has_estimate = true;
-        }
-        self.last = Some((master_frame, device_frame));
+        self.applied_ppm += (target - self.applied_ppm).clamp(-50.0, 50.0);
+        self.window_start = Some((master_frame, device_frame));
+        self.last_seen = Some((master_frame, device_frame));
         true
     }
 
@@ -150,7 +156,7 @@ mod tests {
         assert!(fast.observe(0, 0));
         assert!(fast.observe(1_000_000, 1_000_100));
         assert!((fast.ppm() - 100.0).abs() < 0.001);
-        assert!((fast.correction_ratio() - 1.0 / 1.0001).abs() < 1e-9);
+        assert!((fast.correction_ratio() - 1.0 / 1.00005).abs() < 1e-9);
         let mut slow = ClockEstimator::new(500.0).unwrap();
         assert!(slow.observe(0, 0));
         assert!(slow.observe(1_000_000, 999_900));
@@ -165,6 +171,10 @@ mod tests {
         assert_eq!(estimator.ppm(), 0.0);
         assert!(estimator.observe(1_000_000, 1_000_400));
         assert!((estimator.ppm() - 400.0).abs() < 0.001);
+        assert!((estimator.correction_ratio() - 1.0 / 1.00005).abs() < 1e-9);
+        for window in 2..=4_u64 {
+            assert!(estimator.observe(window * 1_000_000, window * 1_000_400));
+        }
         assert!((estimator.correction_ratio() - 1.0 / 1.0002).abs() < 1e-9);
         estimator.reset();
         assert_eq!(estimator.ppm(), 0.0);
@@ -176,9 +186,38 @@ mod tests {
         let mut estimator = ClockEstimator::new(200.0).unwrap();
         assert!(estimator.observe(0, 0));
         assert!(estimator.observe(1_000_000, 1_000_400));
-        assert!((estimator.correction_ratio() - 1.0 / 1.0002).abs() < 1e-9);
+        assert!((estimator.correction_ratio() - 1.0 / 1.00005).abs() < 1e-9);
         assert!(estimator.observe(2_000_000, 2_000_000));
         assert!((estimator.ppm() + 400.0).abs() < 0.001);
-        assert!((estimator.correction_ratio() - 1.0 / 1.00015).abs() < 1e-9);
+        assert_eq!(estimator.correction_ratio(), 1.0);
+    }
+
+    #[test]
+    fn callback_cadence_estimates_hundred_ppm_from_integer_frames() {
+        for device_rate in [10_001_u64, 9_999_u64] {
+            let mut estimator = ClockEstimator::new(200.0).unwrap();
+            assert!(estimator.observe(0, 0));
+            for callback in 1..=1_000_u64 {
+                let master = callback * 480;
+                let device = master * device_rate / 10_000;
+                assert!(estimator.observe(master, device), "callback {callback}");
+            }
+            let target = if device_rate > 10_000 { 100.0 } else { -100.0 };
+            assert!(
+                (estimator.ppm() - target).abs() < 25.0,
+                "rate {device_rate}: {}",
+                estimator.ppm()
+            );
+        }
+    }
+
+    #[test]
+    fn first_estimate_slews_from_unity_before_reaching_clamp() {
+        let mut estimator = ClockEstimator::new(200.0).unwrap();
+        assert!(estimator.observe(0, 0));
+        assert!(estimator.observe(1_000_000, 1_000_400));
+        assert!((estimator.correction_ratio() - 1.0 / 1.00005).abs() < 1e-9);
+        assert!(estimator.observe(2_000_000, 2_000_800));
+        assert!((estimator.correction_ratio() - 1.0 / 1.0001).abs() < 1e-9);
     }
 }

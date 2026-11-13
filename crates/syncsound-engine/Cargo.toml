@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 cpal = "0.15"
+crossbeam-queue = "0.3"
 serde.workspace = true
 thiserror = "2"
 
