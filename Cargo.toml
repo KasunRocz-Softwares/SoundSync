@@ -1,0 +1,3 @@
+[workspace]
+members = ["apps/desktop/src-tauri", "crates/syncsound-engine"]
+resolver = "2"
