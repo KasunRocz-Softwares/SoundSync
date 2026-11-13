@@ -120,6 +120,10 @@ The script bumps the version, runs the tests, builds the NSIS and MSI installers
 - The capture format is fixed at 48 kHz stereo float. Multichannel content is downmixed by Windows.
 - Hardware checks for hotplug, sleep/resume, Bluetooth profile switches, and long sessions are listed as unverified in `docs/verification/2026-11-13-windows-release.md`.
 
+## Code signing
+
+Signed releases go through SignPath. See [docs/CODE_SIGNING.md](docs/CODE_SIGNING.md) for the code signing policy and setup.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

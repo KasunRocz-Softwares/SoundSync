@@ -1,0 +1,122 @@
+# Signed release: build in GitHub Actions, Authenticode-sign the installers with
+# SignPath (free for open source via SignPath Foundation), add the updater
+# signature to the *signed* installer, then publish the GitHub release that
+# installed copies auto-update from.
+#
+# Runs when a tag like v1.2.3 is pushed (after bumping versions on main), or
+# manually. It is skipped until the SignPath variables below exist.
+#
+# Repository settings → Secrets and variables → Actions:
+#   Variables: SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG,
+#              SIGNPATH_SIGNING_POLICY_SLUG (e.g. release-signing)
+#   Secrets:   SIGNPATH_API_TOKEN, TAURI_SIGNING_PRIVATE_KEY
+#              (contents of %USERPROFILE%\.tauri\syncsound-updater.key),
+#              TAURI_SIGNING_PRIVATE_KEY_PASSWORD (empty if the key has none)
+# See docs/CODE_SIGNING.md.
+name: Signed release
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and release (e.g. v0.3.0)
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    if: vars.SIGNPATH_ORGANIZATION_ID != ''
+    runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - id: version
+        shell: pwsh
+        run: |
+          $v = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = '${{ github.event.inputs.tag || github.ref_name }}'
+          if ("v$v" -ne $tag) { throw "Tag $tag does not match app version $v" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+      - run: npm ci
+      - run: npm run build
+      - run: cargo test --workspace
+      # Unsigned for the updater here: its signature must cover the Authenticode-signed file.
+      - run: npm run desktop:build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installers
+          path: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+  sign-and-publish:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installers
+          github-artifact-id: ${{ needs.build.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Updater signature and latest.json
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          $setup = Get-ChildItem signed -Recurse -Filter "SyncSound_${env:VERSION}_x64-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw 'Signed NSIS installer not found' }
+          $sig = Get-AuthenticodeSignature $setup.FullName
+          if ($sig.Status -ne 'Valid') { throw "Installer is not Authenticode-signed: $($sig.Status)" }
+          npx tauri signer sign $setup.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Updater signing failed' }
+          $tag = "v$env:VERSION"
+          $manifest = [ordered]@{
+            version = $env:VERSION
+            notes = "See https://github.com/${{ github.repository }}/releases/tag/$tag"
+            pub_date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            platforms = [ordered]@{
+              'windows-x86_64' = [ordered]@{
+                signature = (Get-Content "$($setup.FullName).sig" -Raw).Trim()
+                url = "https://github.com/${{ github.repository }}/releases/download/$tag/$($setup.Name)"
+              }
+            }
+          }
+          [IO.File]::WriteAllText("$PWD/latest.json", ($manifest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          $tag = "v$env:VERSION"
+          $files = @(Get-ChildItem signed -Recurse -Include *.exe, *.exe.sig, *.msi | ForEach-Object FullName) + "latest.json"
+          gh release create $tag @files --title "SyncSound $env:VERSION" --generate-notes
