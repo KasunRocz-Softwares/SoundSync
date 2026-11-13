@@ -245,3 +245,5 @@ button.nav.active { background: #1c3840; color: #6ee7cf; }
 .calib-report table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 .calib-report th { text-align: left; color: var(--faint); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); }
 .calib-report td { padding: 8px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+
+aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }

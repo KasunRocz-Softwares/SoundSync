@@ -1024,12 +1024,8 @@ impl Core {
             .ok_or_else(|| fail("Microphone not found"))?;
         let recorder =
             MicRecorder::start(mic.id.clone(), self.format.sample_rate).map_err(|e| fail(&e))?;
-        // Full gain, spatial off: the measurement needs each click loud and whole.
-        for id in &order {
-            if let Some(slot) = self.outputs.get(id) {
-                slot.controls.set_gain(1.0);
-            }
-        }
+        // Spatial off so each click reaches only the output being measured. Gains
+        // stay as the user set them: never louder than what they normally hear.
         let mut config = self.spatial_config;
         config.enabled = false;
         self.spatial.set(config, &[]);
@@ -1091,10 +1087,7 @@ impl Core {
             run.mic_name,
             run.started,
         );
-        // Restore gains and the spatial field.
-        for slot in self.outputs.values() {
-            slot.controls.set_gain(slot.config.gain);
-        }
+        // Restore the spatial field.
         self.recompute_placement();
         let _ = run.reply.send(report);
     }

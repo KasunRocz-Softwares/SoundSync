@@ -33,7 +33,7 @@ export function CalibrationCard({ snapshot, onDone }: { snapshot: EngineSnapshot
     <div className="setup-head">
       <h2><Wand2 size={16} /> Calibrate with a microphone</h2>
     </div>
-    <p className="hint">Put the microphone where you sit and keep the room quiet. SyncSound plays short clicks through each speaker in turn (about {seconds} s), listens, and sets every speaker's delay so they reach you at the same moment. Distance and Bluetooth delay are included automatically, so turn off "Compensate for distance" afterwards.</p>
+    <p className="hint">Put the microphone where you sit and keep the room quiet. SyncSound plays short clicks through each speaker in turn, at each speaker's own gain (about {seconds} s), listens, and sets every speaker's delay so they reach you at the same moment. Distance and Bluetooth delay are included automatically, so turn off "Compensate for distance" afterwards.</p>
     <div className="row">
       <Mic size={16} />
       <select value={mic} onChange={e => setMic(e.target.value)} aria-label="Microphone" disabled={busy}>
