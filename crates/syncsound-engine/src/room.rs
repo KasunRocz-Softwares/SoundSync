@@ -24,6 +24,8 @@ const SWEEP_F1: f64 = 20_000.0;
 const AMPLITUDE: f32 = 0.5;
 pub const MAX_CUT_DB: f32 = -9.0;
 pub const MAX_BOOST_DB: f32 = 3.0;
+/// Bands (indices into BANDS) that may be boosted: 63 Hz – 4 kHz.
+const BOOSTABLE: std::ops::RangeInclusive<usize> = 1..=7;
 /// Bands must sit this far above the noise floor to be corrected.
 const MIN_BAND_SNR_DB: f64 = 10.0;
 /// A low band this far below the reference is roll-off, not a room dip.
@@ -164,6 +166,11 @@ pub fn analyze(window: &[f32], noise: &[f32], rate: u32) -> RoomResult {
         }
         // Correct half the deviation: rooms vary across seats and mics aren't flat.
         correction[i] = ((-dev * 0.5) as f32).clamp(MAX_CUT_DB, MAX_BOOST_DB);
+        // Voice and headset microphones barely hear the extremes, so a "deficit"
+        // there is usually the mic, not the room: only boost 63 Hz – 4 kHz.
+        if !BOOSTABLE.contains(&i) {
+            correction[i] = correction[i].min(0.0);
+        }
         if correction[i].abs() < 0.5 {
             correction[i] = 0.0;
         }
@@ -256,6 +263,38 @@ mod tests {
             r.correction_db
         );
         assert!(r.correction_db[5].abs() < 1.5, "1 kHz roughly untouched");
+    }
+
+    #[test]
+    fn extremes_are_only_ever_cut() {
+        // Like a headset mic: weak deep bass and weak top end.
+        let dry = sweep(SEGMENT_S);
+        let dull = filter(&dry, Biquad::peaking(16_000.0, f64::from(RATE), -9.0, 1.4));
+        let thin = filter(&dull, Biquad::peaking(31.5, f64::from(RATE), -8.0, 1.4));
+        let r = analyze(&thin, &noise(48_000, 0.0001), RATE);
+        assert!(
+            r.correction_db[9] <= 0.0,
+            "no 16 kHz boost: {:?}",
+            r.correction_db
+        );
+        assert!(
+            r.correction_db[0] <= 0.0,
+            "no 31.5 Hz boost: {:?}",
+            r.correction_db
+        );
+        assert!(
+            r.correction_db[8] <= 0.0,
+            "no 8 kHz boost: {:?}",
+            r.correction_db
+        );
+        // A peak at the top end is still cut.
+        let bright = filter(&dry, Biquad::peaking(16_000.0, f64::from(RATE), 9.0, 1.4));
+        let r = analyze(&bright, &noise(48_000, 0.0001), RATE);
+        assert!(
+            r.correction_db[9] < -1.0,
+            "16 kHz peak cut: {:?}",
+            r.correction_db
+        );
     }
 
     #[test]

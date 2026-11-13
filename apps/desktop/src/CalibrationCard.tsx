@@ -69,7 +69,7 @@ export function CalibrationCard({ snapshot, onDone }: { snapshot: EngineSnapshot
         <thead><tr><th>Output</th>{ROOM_BANDS.map(b => <th key={b}>{bandLabel(b)}</th>)}</tr></thead>
         <tbody>{room.outputs.map(o => <React.Fragment key={o.endpoint_id}>
           <tr><td>{o.name}<small>{o.result ? `measured · SNR ${o.result.snr_db.toFixed(0)} dB` : 'not heard'}</small></td>
-            {ROOM_BANDS.map((b, i) => { const r = o.result?.response_db[i]; return <td key={b} className="resp">{r == null ? '—' : `${r > 0 ? '+' : ''}${r.toFixed(0)}`}</td>; })}</tr>
+            {ROOM_BANDS.map((b, i) => { const r = o.result?.response_db[i]; return <td key={b} className="resp">{r == null ? '—' : (Math.round(r) === 0 ? '0' : `${r > 0 ? '+' : ''}${Math.round(r)}`)}</td>; })}</tr>
           <tr className="corr"><td>{o.applied ? 'correction applied' : 'not applied'}</td>
             {ROOM_BANDS.map((b, i) => { const c = o.result?.correction_db[i] ?? 0; return <td key={b} className={c < 0 ? 'cut' : c > 0 ? 'boost' : ''}>{c ? `${c > 0 ? '+' : ''}${c.toFixed(1)}` : '·'}</td>; })}</tr>
         </React.Fragment>)}</tbody>
