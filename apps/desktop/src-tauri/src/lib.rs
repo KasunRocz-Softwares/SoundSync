@@ -7,6 +7,7 @@ use syncsound_engine::commands::{
     parse_mode, parse_source, validate_delay, validate_enable, validate_endpoint_id,
     validate_volume, CommandError,
 };
+use syncsound_engine::eq::EqSettings;
 use syncsound_engine::placement::{validate_distance, validate_trim, SoundPreset, SpeakerPosition};
 use syncsound_engine::profile::{MissingOutput, Profile, ProfileStore};
 use syncsound_engine::render::{AudioMode, ChannelRole};
@@ -233,6 +234,14 @@ async fn set_spatial(
     state.engine.set_spatial(config).map_err(engine_error)
 }
 
+#[tauri::command]
+async fn set_device_eq(id: String, eq: EqSettings, state: State<'_, AppState>) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    eq.validate()?;
+    state.engine.set_eq(id, eq).map_err(engine_error)
+}
+
 #[derive(Serialize)]
 struct SyncMetrics {
     running: bool,
@@ -393,7 +402,8 @@ pub fn run() {
             set_device_map_placement,
             set_device_spread,
             set_device_subwoofer,
-            set_spatial
+            set_spatial,
+            set_device_eq
         ])
         .build(tauri::generate_context!())
         .expect("error while building SyncSound");

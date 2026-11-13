@@ -27,6 +27,7 @@ const COMMANDS: &[&str] = &[
     "set_device_spread",
     "set_device_subwoofer",
     "set_spatial",
+    "set_device_eq",
 ];
 
 fn main() {

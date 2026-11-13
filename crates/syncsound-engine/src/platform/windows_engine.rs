@@ -5,6 +5,7 @@
 use super::windows::{CaptureError, EndpointCatalog, LoopbackCapture};
 use super::windows_render::{RenderWorker, WorkerPoll};
 use crate::capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState, EndpointState};
+use crate::eq::{design, EqSettings};
 use crate::output_state::{OutputLifecycle, OutputLifecycleState};
 use crate::placement::{apply_preset, compute_placement, SoundPreset, SpeakerPosition};
 use crate::render::{
@@ -66,6 +67,7 @@ enum Command {
     SetSpread(String, StereoSpread, Reply<()>),
     SetSubwoofer(String, bool, Reply<()>),
     SetSpatial(SpatialConfig, Reply<()>),
+    SetEq(String, EqSettings, Reply<()>),
     ApplyPreset(SoundPreset, Reply<()>),
     Refresh(Reply<Vec<AudioEndpoint>>),
     Shutdown,
@@ -192,6 +194,9 @@ impl AudioEngine {
     pub fn set_subwoofer(&self, id: String, on: bool) -> Result<(), EngineError> {
         self.call(|r| Command::SetSubwoofer(id, on, r))
     }
+    pub fn set_eq(&self, id: String, settings: EqSettings) -> Result<(), EngineError> {
+        self.call(|r| Command::SetEq(id, settings, r))
+    }
     pub fn set_spatial(&self, config: SpatialConfig) -> Result<(), EngineError> {
         self.call(|r| Command::SetSpatial(config, r))
     }
@@ -221,6 +226,7 @@ struct OutputSlot {
     lifecycle: OutputLifecycle,
     producer: Option<PcmProducer>,
     worker: Option<RenderWorker>,
+    published_eq: Option<EqSettings>,
 }
 
 struct Core {
@@ -337,6 +343,7 @@ impl Core {
                     lifecycle: OutputLifecycle::default(),
                     producer: None,
                     worker: None,
+                    published_eq: None,
                 },
             );
         }
@@ -443,6 +450,9 @@ impl Core {
             Command::SetSubwoofer(id, on, reply) => {
                 let _ = reply.send(self.slot(&id).map(|s| s.config.subwoofer = on));
             }
+            Command::SetEq(id, settings, reply) => {
+                let _ = reply.send(self.slot(&id).map(|s| s.config.eq = settings));
+            }
             Command::SetSpatial(config, reply) => {
                 self.spatial_config = config;
                 let _ = reply.send(Ok(()));
@@ -481,8 +491,15 @@ impl Core {
             self.distance_compensation,
             self.format.sample_rate,
         );
-        for (slot, placement) in self.outputs.values().zip(placements) {
+        let rate = self.format.sample_rate;
+        for (slot, placement) in self.outputs.values_mut().zip(placements) {
             slot.controls.set_role(slot.config.role);
+            if slot.published_eq != Some(slot.config.eq) {
+                slot.controls
+                    .eq
+                    .publish(&design(&slot.config.eq, rate), slot.config.eq.headroom());
+                slot.published_eq = Some(slot.config.eq);
+            }
             slot.controls.set_trim(placement.level);
             slot.controls
                 .set_placement_delay_frames(placement.delay_frames);

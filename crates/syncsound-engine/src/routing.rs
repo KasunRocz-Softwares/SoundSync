@@ -1,6 +1,7 @@
 //! Portable routing model: output configuration, published engine snapshots,
 //! and Synchronized-mode alignment policy.
 use crate::capture::{AudioEndpoint, CaptureSource, CaptureState};
+use crate::eq::EqSettings;
 use crate::output_state::OutputLifecycleState;
 use crate::placement::SpeakerPosition;
 use crate::render::{frames_to_ms, AudioMode, ChannelRole, OutputMetricsSnapshot, MAX_ALIGN_MS};
@@ -33,6 +34,8 @@ pub struct OutputConfig {
     /// Receives the low-passed LFE feed in spatial mode instead of the panned mix.
     #[serde(default)]
     pub subwoofer: bool,
+    #[serde(default)]
+    pub eq: EqSettings,
 }
 
 impl OutputConfig {
@@ -50,6 +53,7 @@ impl OutputConfig {
             azimuth_deg: None,
             spread: StereoSpread::Point,
             subwoofer: false,
+            eq: EqSettings::default(),
         }
     }
 }

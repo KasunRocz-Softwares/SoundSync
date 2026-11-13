@@ -2,6 +2,7 @@
 //! friendly name: missing endpoints are reported and require an explicit rebind.
 use crate::capture::{AudioEndpoint, CaptureSource};
 use crate::commands::{validate_delay, validate_volume, CommandError};
+use crate::eq::EqSettings;
 use crate::placement::{validate_distance, validate_trim, SpeakerPosition};
 use crate::render::{AudioMode, ChannelRole, MAX_ENABLED_OUTPUTS};
 use crate::routing::{EngineSnapshot, OutputConfig};
@@ -57,6 +58,8 @@ pub struct ProfileOutput {
     pub spread: StereoSpread,
     #[serde(default)]
     pub subwoofer: bool,
+    #[serde(default)]
+    pub eq: EqSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -91,6 +94,7 @@ impl ProfileOutput {
             azimuth_deg: None,
             spread: StereoSpread::Point,
             subwoofer: false,
+            eq: EqSettings::default(),
         }
     }
 }
@@ -166,6 +170,7 @@ impl Profile {
                     azimuth_deg: o.config.azimuth_deg,
                     spread: o.config.spread,
                     subwoofer: o.config.subwoofer,
+                    eq: o.config.eq,
                 })
                 .collect(),
             distance_compensation: snapshot.distance_compensation,
@@ -213,6 +218,7 @@ impl Profile {
                 validate_distance(f64::from(distance))?;
             }
             validate_trim(f64::from(output.trim_db))?;
+            output.eq.validate()?;
             if let Some(azimuth) = output.azimuth_deg {
                 validate_azimuth(f64::from(azimuth))?;
             }
@@ -285,6 +291,7 @@ impl Profile {
                     azimuth_deg: output.azimuth_deg,
                     spread: output.spread,
                     subwoofer: output.subwoofer,
+                    eq: output.eq,
                 });
             } else {
                 missing.push(MissingOutput {

@@ -31,6 +31,7 @@
     "allow-set-device-map-placement",
     "allow-set-device-spread",
     "allow-set-device-subwoofer",
-    "allow-set-spatial"
+    "allow-set-spatial",
+    "allow-set-device-eq"
   ]
 }

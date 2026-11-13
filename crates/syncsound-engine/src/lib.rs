@@ -9,6 +9,7 @@ pub mod capture;
 pub mod commands;
 pub mod diagnostics;
 pub mod dsp;
+pub mod eq;
 pub mod metrics;
 pub mod output_state;
 pub mod placement;

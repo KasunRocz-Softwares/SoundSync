@@ -3,6 +3,7 @@
 //! encoding. The Windows worker calls `RenderPipeline::render` from its event loop;
 //! that call never allocates, locks, logs, blocks, or performs I/O.
 use crate::dsp::DspError;
+use crate::eq::{EqProcessor, EqShared};
 use crate::spatial::{virtual_channels, GainMatrix, LowPass, SpatialShared, MAX_VIRTUAL};
 use crate::{PcmConsumer, PcmFormat};
 use serde::{Deserialize, Serialize};
@@ -154,6 +155,8 @@ pub struct OutputControls {
     /// Index among spatial outputs (its points are 2·slot and 2·slot+1); 255 = none.
     spatial_slot: AtomicU8,
     subwoofer: AtomicBool,
+    /// Equalizer coefficients published by the control thread.
+    pub eq: EqShared,
 }
 
 impl OutputControls {
@@ -170,6 +173,7 @@ impl OutputControls {
             role: AtomicU8::new(ChannelRole::Stereo.to_u8()),
             spatial_slot: AtomicU8::new(u8::MAX),
             subwoofer: AtomicBool::new(false),
+            eq: EqShared::new(),
         }
     }
     pub fn spatial_slot(&self) -> Option<usize> {
@@ -355,6 +359,7 @@ pub struct RenderPipeline {
     spatial: Option<Arc<SpatialShared>>,
     lfe: LowPass,
     lfe_coefficient: f32,
+    eq: EqProcessor,
 }
 
 impl RenderPipeline {
@@ -402,6 +407,7 @@ impl RenderPipeline {
             spatial: None,
             lfe: LowPass::default(),
             lfe_coefficient: LowPass::coefficient(format.sample_rate),
+            eq: EqProcessor::default(),
         })
     }
 
@@ -608,6 +614,7 @@ impl RenderPipeline {
             _ => None,
         };
         let mut virtual_frame = [0.0f32; MAX_VIRTUAL];
+        self.eq.refresh(&self.controls.eq);
         let gain_step = if frames_out > 0 {
             (target_gain - self.gain) / frames_out as f32
         } else {
@@ -661,6 +668,7 @@ impl RenderPipeline {
                 }
                 None => role.apply(out),
             }
+            self.eq.process(out);
             self.phase += ratio;
             while self.phase >= 1.0 && self.len > 0 {
                 self.phase -= 1.0;
