@@ -1,5 +1,7 @@
 # SyncSound development roadmap
 
+The [Windows runnable baseline](baseline/2026-11-13-windows-baseline.md) records toolchain prerequisites and workspace checks before audio implementation. Core Audio dependency flags are prepared, but the current diagnostic-tone behavior remains unchanged.
+
 | Phase | Deliverable | Acceptance |
 |---|---|---|
 | 0.1 | Windows Tauri UI, device discovery, diagnostic output | App launches; outputs enumerated; tone plays independently |

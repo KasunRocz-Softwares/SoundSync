@@ -18,6 +18,8 @@ npm ci
 npm run desktop:dev
 ```
 
+The checkout includes npm and Cargo lockfiles for repeatable builds. The Windows toolchain and check results for this baseline are recorded in [the Windows baseline](docs/baseline/2026-11-13-windows-baseline.md). The `windows` Core Audio bindings are present for upcoming platform work; this task does not add capture or synchronized playback.
+
 **Safety:** Reduce speaker volume before testing; multiple devices will play a continuous 440 Hz tone. Test tone volume defaults to 12% and can be stopped individually or globally.
 
 ## Build Windows installers
