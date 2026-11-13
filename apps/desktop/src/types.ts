@@ -10,6 +10,7 @@ export type AudioEndpoint = {
   bits_per_sample: number | null;
   channel_mask: number | null;
   connection_type: string | null;
+  bus: string | null;
 };
 
 export type CaptureSource = 'DefaultRender' | 'SystemExcludingSelf' | { Endpoint: string };
@@ -53,6 +54,7 @@ export type OutputStatus = {
   device_latency_ms: number;
   estimated_latency_ms: number;
   metrics: OutputMetrics;
+  bluetooth: boolean;
   warning: string | null;
 };
 

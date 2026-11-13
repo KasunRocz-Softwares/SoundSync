@@ -73,6 +73,7 @@ header p, .device-info p { color: var(--muted); margin: 0; line-height: 1.5; }
 .device-info h3 { font-size: 15px; margin-bottom: 3px; overflow-wrap: anywhere; }
 .device-info p { font-size: 12.5px; }
 .tag { font-size: 11px; font-weight: 600; color: #6fe0c9; background: var(--accent-soft); padding: 3px 7px; border-radius: 5px; margin-left: 8px; vertical-align: 2px; }
+.tag.bt { color: #9cc3ff; background: #1c2d4a; }
 
 .state { font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 20px; background: #24303f; color: var(--muted); white-space: nowrap; }
 .state.running { background: #143b35; color: #7bf0d8; }

@@ -17,6 +17,7 @@ fn endpoint(id: &str, default: bool) -> AudioEndpoint {
         bits_per_sample: Some(32),
         channel_mask: None,
         connection_type: None,
+        bus: None,
     }
 }
 

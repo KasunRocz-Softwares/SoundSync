@@ -3,7 +3,7 @@
 //! encoding. The Windows worker calls `RenderPipeline::render` from its event loop;
 //! that call never allocates, locks, logs, blocks, or performs I/O.
 use crate::dsp::DspError;
-use crate::{PcmConsumer, PcmFormat, QueueStatus};
+use crate::{PcmConsumer, PcmFormat};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -12,6 +12,8 @@ use std::sync::Arc;
 pub const MAX_ENABLED_OUTPUTS: usize = 8;
 /// Manual per-output delay bound.
 pub const MAX_OUTPUT_DELAY_MS: u32 = 1_000;
+/// Callbacks averaged after a capture discontinuity before the one-shot resync.
+const RESYNC_WINDOW: u32 = 20;
 /// Bound on automatic Synchronized-mode alignment delay per output.
 pub const MAX_ALIGN_MS: u32 = 500;
 
@@ -242,6 +244,8 @@ pub struct RenderPipeline {
     applied_extra: u32,
     smoothed_error: f64,
     correction_ppm: f64,
+    resync_callbacks: u32,
+    resync_error_sum: f64,
     gain: f32,
     controls: Arc<OutputControls>,
     metrics: Arc<OutputMetrics>,
@@ -284,6 +288,8 @@ impl RenderPipeline {
             applied_extra: 0,
             smoothed_error: 0.0,
             correction_ppm: 0.0,
+            resync_callbacks: 0,
+            resync_error_sum: 0.0,
             gain: controls.gain(),
             controls,
             metrics,
@@ -306,37 +312,64 @@ impl RenderPipeline {
         self.len -= frames;
     }
 
+    fn make_room(&mut self, frames: usize) {
+        let overflow = (self.len + frames).saturating_sub(self.ring_frames);
+        if overflow > 0 {
+            self.metrics.record_overrun();
+            self.drop_front(overflow);
+        }
+    }
+
+    /// Appends `block[offset..offset + frames]` to the ring.
+    fn write_block(&mut self, offset: usize, frames: usize) {
+        self.make_room(frames);
+        let ch = self.channels;
+        let write = (self.read + self.len) % self.ring_frames;
+        let first_part = frames.min(self.ring_frames - write);
+        self.ring[write * ch..(write + first_part) * ch]
+            .copy_from_slice(&self.block[offset * ch..(offset + first_part) * ch]);
+        if first_part < frames {
+            let rest = frames - first_part;
+            self.ring[..rest * ch]
+                .copy_from_slice(&self.block[(offset + first_part) * ch..(offset + frames) * ch]);
+        }
+        self.len += frames;
+    }
+
+    fn restart_timeline(&mut self) {
+        self.len = 0;
+        self.phase = 0.0;
+        self.primed = false;
+        self.smoothed_error = 0.0;
+    }
+
+    /// A capture timestamp discontinuity (paused source, flushed or lost packets)
+    /// schedules a one-shot resync to the target buffer instead of slewing for
+    /// minutes at the drift-correction clamp. No silence is synthesised here: if the
+    /// source paused long enough to drain the buffer, the underrun already played it.
+    /// Jumps beyond ~0.5 s restart the timeline and re-prime.
     fn ingest(&mut self) {
+        let max_gap = u64::from(self.sample_rate / 2);
         loop {
-            match self.consumer.pop_into(&mut self.block) {
-                Ok((first, frames)) => {
-                    if self.expected_next.is_some_and(|next| next != first) {
-                        self.metrics.record_discontinuity();
-                    }
-                    self.expected_next = first.checked_add(frames as u64);
-                    if frames > self.ring_frames {
-                        continue;
-                    }
-                    let overflow = (self.len + frames).saturating_sub(self.ring_frames);
-                    if overflow > 0 {
-                        self.metrics.record_overrun();
-                        self.drop_front(overflow);
-                    }
-                    let write = (self.read + self.len) % self.ring_frames;
-                    let first_part = frames.min(self.ring_frames - write);
-                    let ch = self.channels;
-                    self.ring[write * ch..(write + first_part) * ch]
-                        .copy_from_slice(&self.block[..first_part * ch]);
-                    if first_part < frames {
-                        let rest = frames - first_part;
-                        self.ring[..rest * ch]
-                            .copy_from_slice(&self.block[first_part * ch..frames * ch]);
-                    }
-                    self.len += frames;
-                }
-                Err(QueueStatus::Empty) => break,
+            let (first, frames) = match self.consumer.pop_into(&mut self.block) {
+                Ok(block) => block,
                 Err(_) => break,
+            };
+            if frames == 0 || frames > self.ring_frames {
+                continue;
             }
+            if let Some(next) = self.expected_next {
+                if first != next {
+                    self.metrics.record_discontinuity();
+                    if first.abs_diff(next) > max_gap {
+                        self.restart_timeline();
+                    }
+                    self.resync_callbacks = RESYNC_WINDOW;
+                    self.resync_error_sum = 0.0;
+                }
+            }
+            self.expected_next = first.checked_add(frames as u64);
+            self.write_block(0, frames);
         }
     }
 
@@ -399,7 +432,26 @@ impl RenderPipeline {
             self.smoothed_error = 0.0;
         }
 
-        let error = (self.len + self.silence_pending) as f64 - target as f64;
+        let mut error = (self.len + self.silence_pending) as f64 - target as f64;
+        if self.resync_callbacks > 0 {
+            self.resync_error_sum += error;
+            self.resync_callbacks -= 1;
+            if self.resync_callbacks == 0 {
+                let mean = self.resync_error_sum / f64::from(RESYNC_WINDOW);
+                // Ignore sub-millisecond offsets; the drift controller handles those.
+                if mean.abs() > f64::from(self.sample_rate) / 1_000.0 {
+                    let frames = mean.abs().round() as usize;
+                    if mean > 0.0 {
+                        self.drop_front(frames);
+                    } else {
+                        self.silence_pending += frames;
+                    }
+                    error -= mean;
+                    self.smoothed_error = 0.0;
+                    self.correction_ppm = 0.0;
+                }
+            }
+        }
         self.smoothed_error += (error - self.smoothed_error) * 0.05;
         // Remove a buffer error over roughly five seconds, clamped and slew-limited.
         let max_ppm = self.controls.max_correction_ppm();
@@ -528,7 +580,7 @@ pub fn encode_samples(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BoundedPcmQueue, PcmProducer};
+    use crate::{BoundedPcmQueue, PcmProducer, QueueStatus};
 
     const FORMAT: PcmFormat = PcmFormat {
         sample_rate: 48_000,
@@ -643,6 +695,56 @@ mod tests {
         controls.set_delay_frames(0);
         pipeline.render(&mut out);
         assert_eq!(pipeline.buffered_frames(), before - 480);
+    }
+
+    #[test]
+    fn capture_discontinuity_resyncs_buffer_to_target() {
+        for lost_blocks in [2u64, 0] {
+            // lost_blocks = 0 with a forward timestamp jump models a re-anchored
+            // timeline (no audio lost); 2 models dropped packets.
+            let (mut producer, mut pipeline, controls, metrics) = output(1.0, 0);
+            let mut out = vec![0.0; 480 * 2];
+            let mut stamp = 0u64;
+            for _ in 0..4 {
+                push_constant(&mut producer, stamp, 480, 1.0);
+                stamp += 480;
+            }
+            // The setpoint is the level *before* a callback, so right after a
+            // 480-frame callback a resynced buffer sits at target − 480.
+            let expected = controls.target_frames() as i64 - 480;
+            for n in 0..200 {
+                if n == 100 {
+                    stamp += 3 * 480; // timestamp jump
+                    if lost_blocks > 0 {
+                        pipeline.render(&mut out);
+                        pipeline.render(&mut out); // consumed while packets were missing
+                    }
+                }
+                push_constant(&mut producer, stamp, 480, 1.0);
+                stamp += 480;
+                pipeline.render(&mut out);
+            }
+            assert!(metrics.snapshot().discontinuities >= 1);
+            let after = pipeline.buffered_frames() as i64;
+            assert!(
+                (after - expected).abs() <= 60,
+                "lost {lost_blocks}: expected {expected}, after {after}"
+            );
+        }
+    }
+
+    #[test]
+    fn long_capture_gap_restarts_and_reprimes() {
+        let (mut producer, mut pipeline, _, metrics) = output(1.0, 0);
+        for i in 0..6 {
+            push_constant(&mut producer, i * 480, 480, 1.0);
+        }
+        let mut out = vec![0.0; 480 * 2];
+        pipeline.render(&mut out);
+        push_constant(&mut producer, 48_000 * 10, 480, 1.0);
+        pipeline.render(&mut out);
+        assert!(!metrics.snapshot().primed);
+        assert_eq!(pipeline.buffered_frames(), 480);
     }
 
     #[test]

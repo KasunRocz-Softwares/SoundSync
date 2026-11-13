@@ -44,6 +44,9 @@ pub struct OutputStatus {
     pub device_latency_ms: f64,
     pub estimated_latency_ms: f64,
     pub metrics: OutputMetricsSnapshot,
+    /// Bluetooth: Windows does not report codec/radio latency for this output.
+    #[serde(default)]
+    pub bluetooth: bool,
     pub warning: Option<String>,
 }
 

@@ -22,6 +22,19 @@ pub struct AudioEndpoint {
     pub channel_mask: Option<u32>,
     /// Best-effort Windows form-factor label; None means unknown, not inferred from name.
     pub connection_type: Option<String>,
+    /// PnP enumerator of the endpoint's device (e.g. "BTHENUM", "USB", "HDAUDIO").
+    #[serde(default)]
+    pub bus: Option<String>,
+}
+
+impl AudioEndpoint {
+    /// Bluetooth transport (codec + radio) latency is not included in what
+    /// Windows reports for the endpoint, so estimates for these are optimistic.
+    pub fn is_bluetooth(&self) -> bool {
+        self.bus.as_deref().is_some_and(|bus| {
+            bus.eq_ignore_ascii_case("BTHENUM") || bus.eq_ignore_ascii_case("BTHLEDEVICE")
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]

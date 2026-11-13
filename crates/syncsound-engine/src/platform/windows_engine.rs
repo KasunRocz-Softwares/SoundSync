@@ -682,6 +682,10 @@ impl Core {
                     buffered_ms,
                     device_latency_ms,
                     estimated_latency_ms,
+                    bluetooth: self
+                        .endpoints
+                        .iter()
+                        .any(|e| e.id == slot.config.endpoint_id && e.is_bluetooth()),
                     warning: if running {
                         latency_warning(self.mode, estimated_latency_ms)
                     } else {

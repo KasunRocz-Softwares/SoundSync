@@ -68,6 +68,7 @@ mod tests {
             bits_per_sample: None,
             channel_mask: None,
             connection_type: None,
+            bus: None,
         });
         snapshot.capture_state = CaptureState::Unavailable {
             endpoint_id: Some(id.into()),

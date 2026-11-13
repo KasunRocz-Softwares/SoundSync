@@ -78,11 +78,12 @@ function OutputCard({ endpoint, status, running, enabledCount, onAction }: {
   const unavailable = endpoint.state !== 'Active';
   const atLimit = !enabled && enabledCount >= MAX_ENABLED_OUTPUTS;
   const showMetrics = running && enabled && state === 'running';
+  const bluetooth = endpoint.bus === 'BTHENUM' || endpoint.bus === 'BTHLEDEVICE';
   return <article className={`device ${enabled ? 'on' : ''} ${unavailable ? 'unavailable' : ''}`}>
     <div className="device-top">
       <div className="device-icon"><Volume2 size={21} /></div>
       <div className="device-info">
-        <h3>{endpoint.name}{endpoint.is_default && <span className="tag">Windows default</span>}</h3>
+        <h3>{endpoint.name}{endpoint.is_default && <span className="tag">Windows default</span>}{bluetooth && <span className="tag bt">Bluetooth</span>}</h3>
         <p>
           {[endpoint.connection_type, endpoint.mix_format && `${endpoint.mix_format.channels} ch · ${endpoint.mix_format.sample_rate.toLocaleString()} Hz`,
             endpoint.bits_per_sample && `${endpoint.bits_per_sample}-bit mix`, unavailable && 'Unplugged or disabled'].filter(Boolean).join(' · ') || 'Format unknown'}
@@ -111,6 +112,7 @@ function OutputCard({ endpoint, status, running, enabledCount, onAction }: {
       <div><dt>Underruns</dt><dd>{status.metrics.underruns}</dd></div>
       <div><dt>Overruns</dt><dd>{status.metrics.overruns}</dd></div>
     </dl>}
+    {enabled && bluetooth && <p className="warn-line"><AlertTriangle size={14} /> Windows does not report Bluetooth codec and radio delay, so this output usually plays 100–250 ms later than shown. Add delay to your other outputs until they match.</p>}
     {status?.warning && <p className="warn-line"><AlertTriangle size={14} /> {status.warning}</p>}
     {enabled && running && status?.last_error && state !== 'running' && <p className="err-line">
       {status.last_error}{status.retry_in_ms != null && ` · retrying in ${Math.ceil(status.retry_in_ms / 1000)} s`}

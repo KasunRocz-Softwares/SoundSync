@@ -191,6 +191,19 @@ impl EndpointCatalog {
                         .to_string(),
                     )
                 });
+                // PKEY_Device_EnumeratorName {a45c254e-df1c-4efd-8020-67d146a850e0},24
+                let bus = properties.as_ref().and_then(|store| {
+                    let key = PROPERTYKEY {
+                        fmtid: windows::core::GUID::from_u128(
+                            0xa45c254e_df1c_4efd_8020_67d146a850e0,
+                        ),
+                        pid: 24,
+                    };
+                    let value = store.GetValue(&key).ok()?;
+                    let text = PropVariantToStringAlloc(&value).ok()?;
+                    let _memory = ComMemory(text.0);
+                    text.to_string().ok().filter(|s| !s.is_empty())
+                });
                 let mut mix_format = None;
                 let mut bits_per_sample = None;
                 let mut channel_mask = None;
@@ -227,6 +240,7 @@ impl EndpointCatalog {
                     bits_per_sample,
                     channel_mask,
                     connection_type,
+                    bus,
                 });
             }
             Ok(endpoints)
