@@ -96,6 +96,25 @@ pub struct CalibrationProgress {
     pub total_s: f64,
     /// Output currently playing clicks.
     pub playing: Option<String>,
+    /// True for a room (frequency-sweep) measurement.
+    #[serde(default)]
+    pub measuring_room: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RoomOutput {
+    pub endpoint_id: String,
+    pub name: String,
+    /// Correction was stored in this output's EQ.
+    pub applied: bool,
+    pub result: Option<crate::room::RoomResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RoomReport {
+    pub microphone: String,
+    pub message: String,
+    pub outputs: Vec<RoomOutput>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

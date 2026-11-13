@@ -19,6 +19,7 @@ pub mod platform;
 pub mod profile;
 pub mod render;
 pub mod ring_buffer;
+pub mod room;
 pub mod routing;
 pub mod spatial;
 pub mod timeline;

@@ -19,12 +19,13 @@ use crate::render::{
     ms_to_frames, AudioMode, ChannelRole, OutputControls, OutputMetrics, RenderPipeline,
     MAX_ENABLED_OUTPUTS,
 };
+use crate::room;
 use crate::routing::AppSourceStatus;
 use crate::routing::{
     alignment_frames, latency_warning, metrics_ms, EngineSnapshot, ErrorRecord, OutputConfig,
     OutputStatus,
 };
-use crate::routing::{CalibrationProgress, CalibrationReport};
+use crate::routing::{CalibrationProgress, CalibrationReport, RoomOutput, RoomReport};
 use crate::spatial::{
     nearest_position, position_azimuth, wrap_deg, SpatialConfig, SpatialShared, StereoSpread,
     MAX_POINTS,
@@ -80,6 +81,7 @@ enum Command {
     ListApps(Reply<Vec<AudioApp>>),
     ListMics(Reply<Vec<Microphone>>),
     Calibrate(String, Reply<CalibrationReport>),
+    MeasureRoom(String, Reply<RoomReport>),
     ApplyPreset(SoundPreset, Reply<()>),
     Refresh(Reply<Vec<AudioEndpoint>>),
     Shutdown,
@@ -222,6 +224,11 @@ impl AudioEngine {
     pub fn calibrate(&self, mic_id: String) -> Result<CalibrationReport, EngineError> {
         self.call_timeout(|r| Command::Calibrate(mic_id, r), Duration::from_secs(90))
     }
+    /// Plays a frequency sweep through each enabled output in turn, records it
+    /// with `mic_id` and applies a room-correction EQ. About 5.5 s per output.
+    pub fn measure_room(&self, mic_id: String) -> Result<RoomReport, EngineError> {
+        self.call_timeout(|r| Command::MeasureRoom(mic_id, r), Duration::from_secs(90))
+    }
     /// Applications that currently have an audio session.
     pub fn list_apps(&self) -> Result<Vec<AudioApp>, EngineError> {
         self.call(Command::ListApps)
@@ -270,7 +277,31 @@ struct CalibrationRun {
     generated: u64,
     total: u64,
     frame_base: u64,
-    reply: Reply<CalibrationReport>,
+    reply: RunReply,
+}
+
+/// What a microphone run measures, and where its result goes.
+enum RunReply {
+    /// Click track: per-output arrival time → delays.
+    Delay(Reply<CalibrationReport>),
+    /// Log sweep: per-output frequency response → room-correction EQ.
+    Room(Reply<RoomReport>),
+}
+
+impl RunReply {
+    fn fail(self, error: EngineError) {
+        match self {
+            RunReply::Delay(r) => {
+                let _ = r.send(Err(error));
+            }
+            RunReply::Room(r) => {
+                let _ = r.send(Err(error));
+            }
+        }
+    }
+    fn is_room(&self) -> bool {
+        matches!(self, RunReply::Room(_))
+    }
 }
 
 struct AppCapture {
@@ -523,7 +554,12 @@ impl Core {
                     .send(list_microphones().map_err(|e| EngineError::Platform(e.to_string())));
             }
             Command::Calibrate(mic_id, reply) => {
-                if let Err(error) = self.start_calibration(mic_id, reply.clone()) {
+                if let Err(error) = self.start_calibration(mic_id, RunReply::Delay(reply.clone())) {
+                    let _ = reply.send(Err(error));
+                }
+            }
+            Command::MeasureRoom(mic_id, reply) => {
+                if let Err(error) = self.start_calibration(mic_id, RunReply::Room(reply.clone())) {
                     let _ = reply.send(Err(error));
                 }
             }
@@ -683,9 +719,9 @@ impl Core {
         self.capture = None;
         self.app_captures.clear();
         if let Some(run) = self.calibration.take() {
-            let _ = run.reply.send(Err(EngineError::Platform(
+            run.reply.fail(EngineError::Platform(
                 "Calibration was cancelled because routing stopped".into(),
-            )));
+            ));
         }
     }
 
@@ -990,11 +1026,7 @@ impl Core {
         }
     }
 
-    fn start_calibration(
-        &mut self,
-        mic_id: String,
-        reply: Reply<CalibrationReport>,
-    ) -> Result<(), EngineError> {
+    fn start_calibration(&mut self, mic_id: String, reply: RunReply) -> Result<(), EngineError> {
         let fail = |m: &str| EngineError::Platform(m.into());
         if self.calibration.is_some() {
             return Err(fail("Calibration is already running"));
@@ -1012,10 +1044,13 @@ impl Core {
             })
             .map(|s| s.config.endpoint_id.clone())
             .collect();
-        if order.len() < 2 {
-            return Err(fail(
-                "Calibration needs at least two playing, unmuted outputs",
-            ));
+        let needed = if reply.is_room() { 1 } else { 2 };
+        if order.len() < needed {
+            return Err(fail(if needed == 1 {
+                "Room measurement needs at least one playing, unmuted output"
+            } else {
+                "Calibration needs at least two playing, unmuted outputs"
+            }));
         }
         let mics = list_microphones().map_err(|e| fail(&e.to_string()))?;
         let mic = mics
@@ -1032,7 +1067,11 @@ impl Core {
         let rate = self.format.sample_rate;
         let names = order.iter().map(|id| self.display_name(id)).collect();
         self.calibration = Some(CalibrationRun {
-            total: total_frames(order.len(), rate),
+            total: if reply.is_room() {
+                room::total_frames(order.len(), rate)
+            } else {
+                total_frames(order.len(), rate)
+            },
             order,
             names,
             recorder,
@@ -1055,9 +1094,18 @@ impl Core {
         let block = (self.click_block.len() / ch) as u64;
         let due = (run.started.elapsed().as_secs_f64() * f64::from(rate)) as u64;
         while run.generated + block <= due.min(run.total) {
-            let soloed = soloed_output(run.generated, run.order.len(), rate);
+            let room_run = run.reply.is_room();
+            let soloed = if room_run {
+                room::soloed_output(run.generated, run.order.len(), rate)
+            } else {
+                soloed_output(run.generated, run.order.len(), rate)
+            };
             for i in 0..block {
-                let x = click_sample(run.generated + i, rate);
+                let x = if room_run {
+                    room::track_sample(run.generated + i, rate)
+                } else {
+                    click_sample(run.generated + i, rate)
+                };
                 self.click_block[i as usize * ch..(i as usize + 1) * ch].fill(x);
             }
             let first = run.frame_base + run.generated;
@@ -1080,16 +1128,91 @@ impl Core {
             return;
         }
         let run = self.calibration.take().unwrap();
-        let report = self.finish_calibration(
-            run.order,
-            run.names,
-            run.recorder,
-            run.mic_name,
-            run.started,
-        );
-        // Restore the spatial field.
-        self.recompute_placement();
-        let _ = run.reply.send(report);
+        match run.reply {
+            RunReply::Delay(reply) => {
+                let report = self.finish_calibration(
+                    run.order,
+                    run.names,
+                    run.recorder,
+                    run.mic_name,
+                    run.started,
+                );
+                self.recompute_placement();
+                let _ = reply.send(report);
+            }
+            RunReply::Room(reply) => {
+                let report = self.finish_room(
+                    run.order,
+                    run.names,
+                    run.recorder,
+                    run.mic_name,
+                    run.started,
+                );
+                // Restores the spatial field and publishes the new EQ.
+                self.recompute_placement();
+                let _ = reply.send(report);
+            }
+        }
+    }
+
+    fn finish_room(
+        &mut self,
+        order: Vec<String>,
+        names: Vec<String>,
+        recorder: MicRecorder,
+        mic_name: String,
+        started: Instant,
+    ) -> Result<RoomReport, EngineError> {
+        let rate = self.format.sample_rate;
+        let fs = f64::from(rate);
+        let mic_started = recorder.started_at;
+        let recording = recorder.finish().map_err(EngineError::Platform)?;
+        let offset = started.saturating_duration_since(mic_started).as_secs_f64()
+            - mic_started.saturating_duration_since(started).as_secs_f64();
+        let track_start = (offset * fs).round() as i64;
+        let slice = |from_s: f64, len_s: f64| -> Option<&[f32]> {
+            let a = track_start + (from_s * fs) as i64;
+            let b = a + (len_s * fs) as i64;
+            (a >= 0 && (b as usize) <= recording.len()).then(|| &recording[a as usize..b as usize])
+        };
+        let noise = slice(0.1, room::LEAD_IN_S - 0.2)
+            .ok_or_else(|| EngineError::Platform("Recording is too short".into()))?;
+        let mut outputs = Vec::new();
+        let mut applied = 0;
+        for (k, id) in order.iter().enumerate() {
+            let window = slice(
+                room::LEAD_IN_S + room::SEGMENT_S * k as f64,
+                room::SEGMENT_S,
+            );
+            let result = window.map(|w| room::analyze(w, noise, rate));
+            let usable = result.as_ref().is_some_and(|r| r.snr_db >= 20.0);
+            if usable {
+                if let (Some(slot), Some(r)) = (self.outputs.get_mut(id), &result) {
+                    slot.config.eq.room_correction = true;
+                    slot.config.eq.correction_db = r.correction_db;
+                    applied += 1;
+                }
+            }
+            outputs.push(RoomOutput {
+                endpoint_id: id.clone(),
+                name: names[k].clone(),
+                applied: usable,
+                result,
+            });
+        }
+        let message = if applied == order.len() {
+            format!("Measured {applied} output(s) with {mic_name} and applied room correction.")
+        } else {
+            format!(
+                "Corrected {applied} of {} outputs. The others were too quiet or the room too noisy; turn them up and try again.",
+                order.len()
+            )
+        };
+        Ok(RoomReport {
+            microphone: mic_name,
+            message,
+            outputs,
+        })
     }
 
     fn finish_calibration(
@@ -1265,6 +1388,7 @@ impl Core {
                 CalibrationProgress {
                     elapsed_s: run.started.elapsed().as_secs_f64(),
                     total_s: run.total as f64 / rate + 1.5,
+                    measuring_room: run.reply.is_room(),
                     playing: soloed.map(|k| run.names[k].clone()),
                 }
             }),

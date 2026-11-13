@@ -16,7 +16,10 @@ pub const MID_HZ: f64 = 1_000.0;
 pub const TREBLE_HZ: f64 = 8_000.0;
 /// Allowed low-cut corner frequencies (0 = off).
 pub const LOW_CUT_OPTIONS: [u32; 7] = [0, 40, 60, 80, 100, 120, 150];
-const STAGES: usize = 4;
+/// 4 manual stages + 10 room-correction bands.
+const STAGES: usize = 14;
+pub const ROOM_MAX_CUT_DB: f32 = -12.0;
+pub const ROOM_MAX_BOOST_DB: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EqSettings {
@@ -30,6 +33,12 @@ pub struct EqSettings {
     pub mid_db: f32,
     #[serde(default)]
     pub treble_db: f32,
+    /// Measured room correction, applied independently of `enabled`.
+    #[serde(default)]
+    pub room_correction: bool,
+    /// Per octave band, 31.5 Hz … 16 kHz (see `room::BANDS`).
+    #[serde(default)]
+    pub correction_db: [f32; 10],
 }
 
 impl EqSettings {
@@ -48,16 +57,32 @@ impl EqSettings {
                 ));
             }
         }
+        if self
+            .correction_db
+            .iter()
+            .any(|c| !c.is_finite() || !(ROOM_MAX_CUT_DB..=ROOM_MAX_BOOST_DB).contains(c))
+        {
+            return Err(CommandError::new(
+                "invalid_eq",
+                "Room correction bands must be between -12 and +6 dB",
+            ));
+        }
         Ok(())
     }
 
     /// Pre-gain that keeps the largest boost from clipping.
     pub fn headroom(&self) -> f32 {
-        if !self.enabled {
-            return 1.0;
-        }
-        let boost = self.bass_db.max(self.mid_db).max(self.treble_db).max(0.0);
-        10f32.powf(-boost / 20.0)
+        let manual = if self.enabled {
+            self.bass_db.max(self.mid_db).max(self.treble_db).max(0.0)
+        } else {
+            0.0
+        };
+        let room = if self.room_correction {
+            self.correction_db.iter().cloned().fold(0.0f32, f32::max)
+        } else {
+            0.0
+        };
+        10f32.powf(-(manual + room) / 20.0)
     }
 }
 
@@ -174,28 +199,47 @@ impl Biquad {
 }
 
 pub fn design(settings: &EqSettings, rate: u32) -> [Biquad; STAGES] {
-    if !settings.enabled {
-        return [Biquad::IDENTITY; STAGES];
-    }
-    let rate = f64::from(rate);
-    [
+    let mut stages = [Biquad::IDENTITY; STAGES];
+    let fs = f64::from(rate);
+    if settings.enabled {
         if settings.low_cut_hz > 0 {
-            Biquad::high_pass(f64::from(settings.low_cut_hz), rate)
-        } else {
-            Biquad::IDENTITY
-        },
-        Biquad::low_shelf(BASS_HZ, rate, f64::from(settings.bass_db)),
-        Biquad::peaking(MID_HZ, rate, f64::from(settings.mid_db), 0.9),
-        Biquad::high_shelf(TREBLE_HZ, rate, f64::from(settings.treble_db)),
-    ]
+            stages[0] = Biquad::high_pass(f64::from(settings.low_cut_hz), fs);
+        }
+        stages[1] = Biquad::low_shelf(BASS_HZ, fs, f64::from(settings.bass_db));
+        stages[2] = Biquad::peaking(MID_HZ, fs, f64::from(settings.mid_db), 0.9);
+        stages[3] = Biquad::high_shelf(TREBLE_HZ, fs, f64::from(settings.treble_db));
+    }
+    if settings.room_correction {
+        for (i, (band, db)) in crate::room::BANDS
+            .iter()
+            .zip(settings.correction_db)
+            .enumerate()
+        {
+            if *band < fs * 0.45 {
+                // One-octave peaking filters, one per measured band.
+                stages[4 + i] = Biquad::peaking(*band, fs, f64::from(db), 1.41);
+            }
+        }
+    }
+    stages
 }
 
 /// Seqlock-published coefficients: control thread writes, render thread reads.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EqShared {
     version: AtomicU64,
     coefficients: [AtomicU32; STAGES * 5],
     headroom: AtomicU32,
+}
+
+impl Default for EqShared {
+    fn default() -> Self {
+        Self {
+            version: AtomicU64::new(0),
+            coefficients: std::array::from_fn(|_| AtomicU32::new(0)),
+            headroom: AtomicU32::new(1.0f32.to_bits()),
+        }
+    }
 }
 
 impl EqShared {
@@ -346,6 +390,7 @@ mod tests {
             bass_db: 6.0,
             mid_db: 0.0,
             treble_db: 0.0,
+            ..Default::default()
         };
         shared.publish(&design(&settings, 48_000), settings.headroom());
         let mut eq = EqProcessor::default();
@@ -363,6 +408,24 @@ mod tests {
         let mut f = [0.25, -0.75];
         eq.process(&mut f);
         assert_eq!(f, [0.25, -0.75]);
+    }
+
+    #[test]
+    fn room_correction_stages_apply_without_manual_eq() {
+        let mut s = EqSettings::default();
+        s.room_correction = true;
+        s.correction_db[2] = -6.0; // 125 Hz
+        let stages = design(&s, 48_000);
+        assert!(
+            stages[..4].iter().all(|b| *b == Biquad::IDENTITY),
+            "manual EQ off"
+        );
+        assert!((db(stages[6].magnitude(125.0, 48_000.0)) + 6.0).abs() < 0.05);
+        s.correction_db[5] = 3.0;
+        assert!((s.headroom() - 10f32.powf(-3.0 / 20.0)).abs() < 1e-6);
+        assert!(s.validate().is_ok());
+        s.correction_db[0] = 7.0;
+        assert!(s.validate().is_err(), "boost over +6 dB rejected");
     }
 
     #[test]
