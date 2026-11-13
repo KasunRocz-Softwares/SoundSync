@@ -49,6 +49,7 @@ fn main() {
             gain,
             muted: false,
             delay_ms: 0,
+            ..OutputConfig::new("")
         })
         .collect();
     assert!(

@@ -6,8 +6,10 @@ use super::windows::{CaptureError, EndpointCatalog, LoopbackCapture};
 use super::windows_render::{RenderWorker, WorkerPoll};
 use crate::capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState, EndpointState};
 use crate::output_state::{OutputLifecycle, OutputLifecycleState};
+use crate::placement::{apply_preset, compute_placement, SoundPreset, SpeakerPosition};
 use crate::render::{
-    ms_to_frames, AudioMode, OutputControls, OutputMetrics, RenderPipeline, MAX_ENABLED_OUTPUTS,
+    ms_to_frames, AudioMode, ChannelRole, OutputControls, OutputMetrics, RenderPipeline,
+    MAX_ENABLED_OUTPUTS,
 };
 use crate::routing::{
     alignment_frames, latency_warning, metrics_ms, EngineSnapshot, ErrorRecord, OutputConfig,
@@ -52,6 +54,11 @@ enum Command {
     SetMute(String, bool, Reply<()>),
     SetDelay(String, u32, Reply<()>),
     ApplyOutputs(Vec<OutputConfig>, Reply<()>),
+    SetPlacement(String, SpeakerPosition, Option<f32>, Reply<()>),
+    SetRole(String, ChannelRole, Reply<()>),
+    SetTrim(String, f32, Reply<()>),
+    SetCompensation(bool, Reply<()>),
+    ApplyPreset(SoundPreset, Reply<()>),
     Refresh(Reply<Vec<AudioEndpoint>>),
     Shutdown,
 }
@@ -147,6 +154,27 @@ impl AudioEngine {
     pub fn apply_outputs(&self, outputs: Vec<OutputConfig>) -> Result<(), EngineError> {
         self.call(|r| Command::ApplyOutputs(outputs, r))
     }
+    /// Position and distance from the listening seat (validated by the caller).
+    pub fn set_placement(
+        &self,
+        id: String,
+        position: SpeakerPosition,
+        distance_m: Option<f32>,
+    ) -> Result<(), EngineError> {
+        self.call(|r| Command::SetPlacement(id, position, distance_m, r))
+    }
+    pub fn set_role(&self, id: String, role: ChannelRole) -> Result<(), EngineError> {
+        self.call(|r| Command::SetRole(id, role, r))
+    }
+    pub fn set_trim(&self, id: String, trim_db: f32) -> Result<(), EngineError> {
+        self.call(|r| Command::SetTrim(id, trim_db, r))
+    }
+    pub fn set_distance_compensation(&self, enabled: bool) -> Result<(), EngineError> {
+        self.call(|r| Command::SetCompensation(enabled, r))
+    }
+    pub fn apply_preset(&self, preset: SoundPreset) -> Result<(), EngineError> {
+        self.call(|r| Command::ApplyPreset(preset, r))
+    }
 }
 
 impl Drop for AudioEngine {
@@ -173,6 +201,7 @@ struct Core {
     format: PcmFormat,
     mode: AudioMode,
     source: CaptureSource,
+    distance_compensation: bool,
     running: bool,
     endpoints: Vec<AudioEndpoint>,
     outputs: BTreeMap<String, OutputSlot>,
@@ -197,6 +226,7 @@ impl Core {
             format,
             mode: AudioMode::default(),
             source: CaptureSource::default(),
+            distance_compensation: true,
             running: false,
             endpoints,
             outputs: BTreeMap::new(),
@@ -231,6 +261,7 @@ impl Core {
                 Ok(Command::Shutdown) => break,
                 Ok(command) => {
                     self.handle(command);
+                    self.recompute_placement();
                     self.publish(true);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -357,11 +388,57 @@ impl Core {
             Command::ApplyOutputs(configs, reply) => {
                 let _ = reply.send(self.apply_outputs(configs));
             }
+            Command::SetPlacement(id, position, distance_m, reply) => {
+                let _ = reply.send(self.slot(&id).map(|s| {
+                    s.config.position = position;
+                    s.config.distance_m = distance_m;
+                }));
+            }
+            Command::SetRole(id, role, reply) => {
+                let _ = reply.send(self.slot(&id).map(|s| s.config.role = role));
+            }
+            Command::SetTrim(id, trim_db, reply) => {
+                let _ = reply.send(self.slot(&id).map(|s| s.config.trim_db = trim_db));
+            }
+            Command::SetCompensation(enabled, reply) => {
+                self.distance_compensation = enabled;
+                let _ = reply.send(Ok(()));
+            }
+            Command::ApplyPreset(preset, reply) => {
+                let mut configs: Vec<OutputConfig> =
+                    self.outputs.values().map(|s| s.config.clone()).collect();
+                let result = apply_preset(preset, &mut configs)
+                    .map(|()| {
+                        for config in configs {
+                            if let Some(slot) = self.outputs.get_mut(&config.endpoint_id) {
+                                slot.config = config;
+                            }
+                        }
+                    })
+                    .map_err(|e| EngineError::Platform(e.message));
+                let _ = reply.send(result);
+            }
             Command::Refresh(reply) => {
                 self.refresh_endpoints();
                 let _ = reply.send(Ok(self.endpoints.clone()));
             }
             Command::Shutdown => {}
+        }
+    }
+
+    /// Pushes role, trim and distance compensation into every output's atomics.
+    fn recompute_placement(&mut self) {
+        let configs: Vec<OutputConfig> = self.outputs.values().map(|s| s.config.clone()).collect();
+        let placements = compute_placement(
+            &configs,
+            self.distance_compensation,
+            self.format.sample_rate,
+        );
+        for (slot, placement) in self.outputs.values().zip(placements) {
+            slot.controls.set_role(slot.config.role);
+            slot.controls.set_trim(placement.level);
+            slot.controls
+                .set_placement_delay_frames(placement.delay_frames);
         }
     }
 
@@ -679,6 +756,9 @@ impl Core {
                         .retry_at()
                         .map(|at| at.saturating_duration_since(now).as_millis() as u64),
                     align_ms: f64::from(slot.controls.align_frames()) * 1_000.0 / f64::from(rate),
+                    placement_delay_ms: f64::from(slot.controls.placement_delay_frames()) * 1_000.0
+                        / f64::from(rate),
+                    placement_level: slot.controls.trim(),
                     buffered_ms,
                     device_latency_ms,
                     estimated_latency_ms,
@@ -713,6 +793,7 @@ impl Core {
             capture_state,
             capture_format: self.format,
             outputs,
+            distance_compensation: self.distance_compensation,
             endpoints: self.endpoints.clone(),
             recent_errors: self.errors.iter().cloned().collect(),
             updated_at_ms: self.started.elapsed().as_millis() as u64,

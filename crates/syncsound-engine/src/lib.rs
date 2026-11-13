@@ -11,6 +11,7 @@ pub mod diagnostics;
 pub mod dsp;
 pub mod metrics;
 pub mod output_state;
+pub mod placement;
 pub mod platform;
 pub mod profile;
 pub mod render;

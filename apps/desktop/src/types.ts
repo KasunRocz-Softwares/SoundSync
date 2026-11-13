@@ -26,7 +26,15 @@ export type CaptureState =
 export type AudioMode = 'gaming' | 'balanced' | 'synchronized';
 export type LifecycleState = 'disabled' | 'starting' | 'running' | 'disconnected' | 'retrying' | 'failed';
 
-export type OutputConfig = { endpoint_id: string; enabled: boolean; gain: number; muted: boolean; delay_ms: number };
+export type ChannelRole = 'stereo' | 'swapped' | 'left_only' | 'right_only' | 'mono';
+export type SpeakerPosition =
+  | 'unassigned' | 'front_left' | 'front' | 'front_right' | 'left' | 'right' | 'rear_left' | 'rear' | 'rear_right';
+export type SoundPreset = 'stereo' | 'front_rear' | 'left_right_split' | 'party_mono';
+
+export type OutputConfig = {
+  endpoint_id: string; enabled: boolean; gain: number; muted: boolean; delay_ms: number;
+  role: ChannelRole; position: SpeakerPosition; distance_m: number | null; trim_db: number;
+};
 
 export type OutputMetrics = {
   underruns: number;
@@ -50,6 +58,8 @@ export type OutputStatus = {
   last_error: string | null;
   retry_in_ms: number | null;
   align_ms: number;
+  placement_delay_ms: number;
+  placement_level: number;
   buffered_ms: number;
   device_latency_ms: number;
   estimated_latency_ms: number;
@@ -67,6 +77,7 @@ export type EngineSnapshot = {
   capture_state: CaptureState;
   capture_format: PcmFormat;
   outputs: OutputStatus[];
+  distance_compensation: boolean;
   endpoints: AudioEndpoint[];
   recent_errors: ErrorRecord[];
   updated_at_ms: number;
@@ -85,3 +96,6 @@ export type CommandError = { code: string; message: string };
 
 export const MAX_ENABLED_OUTPUTS = 8;
 export const MAX_DELAY_MS = 1000;
+export const MIN_DISTANCE_M = 0.2;
+export const MAX_DISTANCE_M = 20;
+export const MIN_TRIM_DB = -24;

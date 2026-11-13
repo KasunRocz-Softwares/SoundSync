@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-distance-compensation"
+description = "Enables the set_distance_compensation command without any pre-configured scope."
+commands.allow = ["set_distance_compensation"]
+
+[[permission]]
+identifier = "deny-set-distance-compensation"
+description = "Denies the set_distance_compensation command without any pre-configured scope."
+commands.deny = ["set_distance_compensation"]

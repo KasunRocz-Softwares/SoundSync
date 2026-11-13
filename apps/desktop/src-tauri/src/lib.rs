@@ -7,8 +7,9 @@ use syncsound_engine::commands::{
     parse_mode, parse_source, validate_delay, validate_enable, validate_endpoint_id,
     validate_volume, CommandError,
 };
+use syncsound_engine::placement::{validate_distance, validate_trim, SoundPreset, SpeakerPosition};
 use syncsound_engine::profile::{MissingOutput, Profile, ProfileStore};
-use syncsound_engine::render::AudioMode;
+use syncsound_engine::render::{AudioMode, ChannelRole};
 use syncsound_engine::{diagnostics, AudioEngine, EngineError, EngineSnapshot, OutputStatus};
 use tauri::{Manager, State};
 
@@ -116,6 +117,62 @@ async fn set_audio_mode(mode: String, state: State<'_, AppState>) -> CmdResult<(
     state.engine.set_mode(mode).map_err(engine_error)
 }
 
+/// Parses a snake_case enum name sent by the UI; unknown names are rejected.
+fn parse_enum<T: serde::de::DeserializeOwned>(value: &str, code: &str) -> CmdResult<T> {
+    serde_json::from_value(serde_json::Value::String(value.into()))
+        .map_err(|_| CommandError::new(code, format!("Unknown value: {value}")))
+}
+
+#[tauri::command]
+async fn set_device_placement(
+    id: String,
+    position: String,
+    distance_m: Option<f64>,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    let position: SpeakerPosition = parse_enum(&position, "invalid_position")?;
+    let distance = distance_m.map(validate_distance).transpose()?;
+    state
+        .engine
+        .set_placement(id, position, distance)
+        .map_err(engine_error)
+}
+
+#[tauri::command]
+async fn set_device_role(id: String, role: String, state: State<'_, AppState>) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    let role: ChannelRole = parse_enum(&role, "invalid_role")?;
+    state.engine.set_role(id, role).map_err(engine_error)
+}
+
+#[tauri::command]
+async fn set_device_trim(id: String, trim_db: f64, state: State<'_, AppState>) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    let trim = validate_trim(trim_db)?;
+    state.engine.set_trim(id, trim).map_err(engine_error)
+}
+
+#[tauri::command]
+async fn set_distance_compensation(enabled: bool, state: State<'_, AppState>) -> CmdResult<()> {
+    state
+        .engine
+        .set_distance_compensation(enabled)
+        .map_err(engine_error)
+}
+
+#[tauri::command]
+async fn apply_sound_preset(preset: String, state: State<'_, AppState>) -> CmdResult<()> {
+    let preset: SoundPreset = parse_enum(&preset, "invalid_preset")?;
+    state
+        .engine
+        .apply_preset(preset)
+        .map_err(|e| CommandError::new("invalid_preset", e.to_string()))
+}
+
 #[derive(Serialize)]
 struct SyncMetrics {
     running: bool,
@@ -165,6 +222,10 @@ async fn load_profile(name: String, state: State<'_, AppState>) -> CmdResult<Pro
     let endpoints = state.engine.refresh_endpoints().map_err(engine_error)?;
     let plan = profile.plan_apply(&endpoints);
     state.engine.set_mode(plan.mode).map_err(engine_error)?;
+    state
+        .engine
+        .set_distance_compensation(plan.distance_compensation)
+        .map_err(engine_error)?;
     if let Some(source) = plan.source.clone() {
         state.engine.set_source(source).map_err(engine_error)?;
     }
@@ -259,7 +320,12 @@ pub fn run() {
             load_profile,
             list_profiles,
             rebind_profile_device,
-            export_diagnostics
+            export_diagnostics,
+            set_device_placement,
+            set_device_role,
+            set_device_trim,
+            set_distance_compensation,
+            apply_sound_preset
         ])
         .build(tauri::generate_context!())
         .expect("error while building SyncSound");

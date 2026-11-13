@@ -33,6 +33,7 @@ fn routes_loopback_to_two_muted_outputs() {
             gain: 0.0,
             muted: true,
             delay_ms: 0,
+            ..OutputConfig::new("")
         })
         .collect();
     engine
@@ -109,6 +110,7 @@ fn default_source_blocks_routing_back_to_default_endpoint() {
             gain: 0.0,
             muted: true,
             delay_ms: 0,
+            ..OutputConfig::new("")
         }])
         .unwrap();
     engine.start().unwrap();

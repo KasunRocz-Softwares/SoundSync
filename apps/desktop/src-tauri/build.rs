@@ -18,6 +18,11 @@ const COMMANDS: &[&str] = &[
     "list_profiles",
     "rebind_profile_device",
     "export_diagnostics",
+    "set_device_placement",
+    "set_device_role",
+    "set_device_trim",
+    "set_distance_compensation",
+    "apply_sound_preset",
 ];
 
 fn main() {

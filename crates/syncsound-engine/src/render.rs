@@ -5,7 +5,7 @@
 use crate::dsp::DspError;
 use crate::{PcmConsumer, PcmFormat};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 /// v0.1 limit on simultaneously enabled outputs.
@@ -24,6 +24,62 @@ pub enum AudioMode {
     #[default]
     Balanced,
     Synchronized,
+}
+
+/// What a single output plays from the stereo source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelRole {
+    #[default]
+    Stereo,
+    /// Left and right exchanged (e.g. a stereo speaker placed facing you from behind a wall).
+    Swapped,
+    /// This output plays the left channel on all its speakers.
+    LeftOnly,
+    RightOnly,
+    /// (L + R) / 2 on all speakers.
+    Mono,
+}
+
+impl ChannelRole {
+    fn to_u8(self) -> u8 {
+        match self {
+            ChannelRole::Stereo => 0,
+            ChannelRole::Swapped => 1,
+            ChannelRole::LeftOnly => 2,
+            ChannelRole::RightOnly => 3,
+            ChannelRole::Mono => 4,
+        }
+    }
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => ChannelRole::Swapped,
+            2 => ChannelRole::LeftOnly,
+            3 => ChannelRole::RightOnly,
+            4 => ChannelRole::Mono,
+            _ => ChannelRole::Stereo,
+        }
+    }
+    /// Maps one stereo frame in place.
+    #[inline]
+    pub fn apply(self, frame: &mut [f32]) {
+        if frame.len() != 2 {
+            return;
+        }
+        let (l, r) = (frame[0], frame[1]);
+        let (a, b) = match self {
+            ChannelRole::Stereo => (l, r),
+            ChannelRole::Swapped => (r, l),
+            ChannelRole::LeftOnly => (l, l),
+            ChannelRole::RightOnly => (r, r),
+            ChannelRole::Mono => {
+                let m = (l + r) * 0.5;
+                (m, m)
+            }
+        };
+        frame[0] = a;
+        frame[1] = b;
+    }
 }
 
 /// Scheduling budgets, not acoustic promises.
@@ -90,6 +146,10 @@ pub struct OutputControls {
     align_frames: AtomicU32,
     target_frames: AtomicU32,
     max_ppm_bits: AtomicU32,
+    /// Speaker-placement compensation, applied on top of the user's gain and delay.
+    placement_delay_frames: AtomicU32,
+    trim_bits: AtomicU32,
+    role: AtomicU8,
 }
 
 impl OutputControls {
@@ -101,7 +161,30 @@ impl OutputControls {
             align_frames: AtomicU32::new(0),
             target_frames: AtomicU32::new(ms_to_frames(policy.target_buffer_ms, rate)),
             max_ppm_bits: AtomicU32::new((policy.max_correction_ppm as f32).to_bits()),
+            placement_delay_frames: AtomicU32::new(0),
+            trim_bits: AtomicU32::new(1.0f32.to_bits()),
+            role: AtomicU8::new(ChannelRole::Stereo.to_u8()),
         }
+    }
+    pub fn placement_delay_frames(&self) -> u32 {
+        self.placement_delay_frames.load(Ordering::Relaxed)
+    }
+    pub fn set_placement_delay_frames(&self, frames: u32) {
+        self.placement_delay_frames.store(frames, Ordering::Relaxed);
+    }
+    /// Linear level multiplier (≤ 1) from placement and level trim.
+    pub fn trim(&self) -> f32 {
+        f32::from_bits(self.trim_bits.load(Ordering::Relaxed))
+    }
+    pub fn set_trim(&self, factor: f32) {
+        self.trim_bits
+            .store(factor.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+    pub fn role(&self) -> ChannelRole {
+        ChannelRole::from_u8(self.role.load(Ordering::Relaxed))
+    }
+    pub fn set_role(&self, role: ChannelRole) {
+        self.role.store(role.to_u8(), Ordering::Relaxed);
     }
     pub fn gain(&self) -> f32 {
         f32::from_bits(self.gain_bits.load(Ordering::Relaxed))
@@ -377,7 +460,8 @@ impl RenderPipeline {
         let extra = self
             .controls
             .delay_frames()
-            .saturating_add(self.controls.align_frames());
+            .saturating_add(self.controls.align_frames())
+            .saturating_add(self.controls.placement_delay_frames());
         if extra == self.applied_extra {
             return;
         }
@@ -463,8 +547,9 @@ impl RenderPipeline {
         let target_gain = if self.controls.muted() {
             0.0
         } else {
-            self.controls.gain()
+            self.controls.gain() * self.controls.trim()
         };
+        let role = self.controls.role();
         let gain_step = if frames_out > 0 {
             (target_gain - self.gain) / frames_out as f32
         } else {
@@ -495,6 +580,7 @@ impl RenderPipeline {
                 let right = self.ring[b * ch + c];
                 out[c] = (left + (right - left) * fraction) * self.gain;
             }
+            role.apply(out);
             self.phase += ratio;
             while self.phase >= 1.0 && self.len > 0 {
                 self.phase -= 1.0;
@@ -836,6 +922,52 @@ mod tests {
             pipeline.render(&mut out);
             assert!(pipeline.correction_ppm() <= 200.0 + 1e-9);
         }
+    }
+
+    #[test]
+    fn channel_roles_map_stereo_frames() {
+        let cases = [
+            (ChannelRole::Stereo, [1.0, 0.0]),
+            (ChannelRole::Swapped, [0.0, 1.0]),
+            (ChannelRole::LeftOnly, [1.0, 1.0]),
+            (ChannelRole::RightOnly, [0.0, 0.0]),
+            (ChannelRole::Mono, [0.5, 0.5]),
+        ];
+        for (role, expected) in cases {
+            let mut frame = [1.0, 0.0];
+            role.apply(&mut frame);
+            assert_eq!(frame, expected, "{role:?}");
+            assert_eq!(ChannelRole::from_u8(role.to_u8()), role);
+        }
+        let mut mono = [0.3];
+        ChannelRole::LeftOnly.apply(&mut mono);
+        assert_eq!(mono, [0.3]);
+    }
+
+    #[test]
+    fn role_trim_and_placement_delay_apply_in_the_render_path() {
+        let (mut producer, mut pipeline, controls, _) = output(1.0, 0);
+        for i in 0..12u64 {
+            let samples: Vec<f32> = (0..480).flat_map(|_| [0.8, 0.2]).collect();
+            producer.push_samples(i * 480, &samples);
+        }
+        controls.set_role(ChannelRole::RightOnly);
+        controls.set_trim(0.5);
+        let mut out = vec![0.0; 480 * 2];
+        pipeline.render(&mut out);
+        pipeline.render(&mut out); // gain ramp settled
+        assert!(out
+            .chunks(2)
+            .all(|f| (f[0] - 0.1).abs() < 1e-6 && (f[1] - 0.1).abs() < 1e-6));
+        let before = pipeline.buffered_frames();
+        controls.set_placement_delay_frames(240);
+        let mut short = vec![0.0; 240 * 2];
+        pipeline.render(&mut short);
+        assert!(
+            short.iter().all(|s| *s == 0.0),
+            "placement delay is held silence"
+        );
+        assert_eq!(pipeline.buffered_frames(), before);
     }
 
     #[test]

@@ -2,7 +2,8 @@
 //! and Synchronized-mode alignment policy.
 use crate::capture::{AudioEndpoint, CaptureSource, CaptureState};
 use crate::output_state::OutputLifecycleState;
-use crate::render::{frames_to_ms, AudioMode, OutputMetricsSnapshot, MAX_ALIGN_MS};
+use crate::placement::SpeakerPosition;
+use crate::render::{frames_to_ms, AudioMode, ChannelRole, OutputMetricsSnapshot, MAX_ALIGN_MS};
 use crate::PcmFormat;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,16 @@ pub struct OutputConfig {
     pub gain: f32,
     pub muted: bool,
     pub delay_ms: u32,
+    #[serde(default)]
+    pub role: ChannelRole,
+    #[serde(default)]
+    pub position: SpeakerPosition,
+    /// Distance from the listening position, if the user entered one.
+    #[serde(default)]
+    pub distance_m: Option<f32>,
+    /// Level trim in dB (≤ 0), e.g. −3 dB for rear speakers.
+    #[serde(default)]
+    pub trim_db: f32,
 }
 
 impl OutputConfig {
@@ -23,6 +34,10 @@ impl OutputConfig {
             gain: 1.0,
             muted: false,
             delay_ms: 0,
+            role: ChannelRole::Stereo,
+            position: SpeakerPosition::Unassigned,
+            distance_m: None,
+            trim_db: 0.0,
         }
     }
 }
@@ -38,6 +53,12 @@ pub struct OutputStatus {
     pub retry_in_ms: Option<u64>,
     /// Automatic Synchronized-mode delay added on top of the manual delay.
     pub align_ms: f64,
+    /// Delay added to compensate for speaker distance.
+    #[serde(default)]
+    pub placement_delay_ms: f64,
+    /// Linear level from distance compensation × trim.
+    #[serde(default = "unity")]
+    pub placement_level: f32,
     pub buffered_ms: f64,
     /// Windows-reported endpoint buffer + stream latency. Excludes Bluetooth/HDMI
     /// transport and acoustic delays Windows does not report.
@@ -65,6 +86,7 @@ pub struct EngineSnapshot {
     pub capture_state: CaptureState,
     pub capture_format: PcmFormat,
     pub outputs: Vec<OutputStatus>,
+    pub distance_compensation: bool,
     pub endpoints: Vec<AudioEndpoint>,
     pub recent_errors: Vec<ErrorRecord>,
     pub updated_at_ms: u64,
@@ -79,11 +101,16 @@ impl EngineSnapshot {
             capture_state: CaptureState::Stopped,
             capture_format: format,
             outputs: Vec::new(),
+            distance_compensation: true,
             endpoints: Vec::new(),
             recent_errors: Vec::new(),
             updated_at_ms: 0,
         }
     }
+}
+
+fn unity() -> f32 {
+    1.0
 }
 
 /// Synchronized mode: delay every output to the slowest *estimated* device latency.

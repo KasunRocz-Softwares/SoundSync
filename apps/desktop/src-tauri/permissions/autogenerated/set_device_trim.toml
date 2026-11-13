@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-device-trim"
+description = "Enables the set_device_trim command without any pre-configured scope."
+commands.allow = ["set_device_trim"]
+
+[[permission]]
+identifier = "deny-set-device-trim"
+description = "Denies the set_device_trim command without any pre-configured scope."
+commands.deny = ["set_device_trim"]

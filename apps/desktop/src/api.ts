@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { AudioEndpoint, AudioMode, EngineSnapshot, ProfileLoadReport } from './types';
+import type {
+  AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpeakerPosition,
+} from './types';
 
 export function errorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message);
@@ -27,4 +29,10 @@ export const api = {
   rebind: (name: string, fromId: string, toId: string) =>
     invoke<void>('rebind_profile_device', { name, fromId, toId }),
   exportDiagnostics: () => invoke<string>('export_diagnostics'),
+  placement: (id: string, position: SpeakerPosition, distanceM: number | null) =>
+    invoke<void>('set_device_placement', { id, position, distanceM }),
+  role: (id: string, role: ChannelRole) => invoke<void>('set_device_role', { id, role }),
+  trim: (id: string, trimDb: number) => invoke<void>('set_device_trim', { id, trimDb }),
+  distanceCompensation: (enabled: boolean) => invoke<void>('set_distance_compensation', { enabled }),
+  preset: (preset: SoundPreset) => invoke<void>('apply_sound_preset', { preset }),
 };

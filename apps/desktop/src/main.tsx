@@ -5,9 +5,9 @@ import {
 } from 'lucide-react';
 import { api, errorMessage, type SourceKind } from './api';
 import {
-  MAX_DELAY_MS, MAX_ENABLED_OUTPUTS,
-  type AudioEndpoint, type AudioMode, type CaptureSource, type CaptureState, type EngineSnapshot,
-  type LifecycleState, type OutputStatus, type ProfileLoadReport,
+  MAX_DELAY_MS, MAX_DISTANCE_M, MAX_ENABLED_OUTPUTS, MIN_DISTANCE_M, MIN_TRIM_DB,
+  type AudioEndpoint, type AudioMode, type CaptureSource, type CaptureState, type ChannelRole, type EngineSnapshot,
+  type LifecycleState, type OutputStatus, type ProfileLoadReport, type SoundPreset, type SpeakerPosition,
 } from './types';
 import './style.css';
 
@@ -15,6 +15,26 @@ const MODES: { id: AudioMode; label: string; detail: string }[] = [
   { id: 'gaming', label: 'Gaming', detail: '20 ms buffer. Lowest delay; warns when an output exceeds 60 ms estimated latency.' },
   { id: 'balanced', label: 'Balanced', detail: '40 ms buffer. Conservative shared buffering for steady playback.' },
   { id: 'synchronized', label: 'Synchronized', detail: '60 ms buffer. Delays faster outputs to the slowest Windows-reported latency.' },
+];
+
+const PRESETS: { id: SoundPreset; label: string; detail: string }[] = [
+  { id: 'stereo', label: 'Stereo', detail: 'Every output plays full stereo.' },
+  { id: 'front_rear', label: 'Front + Rear', detail: 'Front outputs at full level; outputs placed at the rear play 3 dB quieter.' },
+  { id: 'left_right_split', label: 'Left / Right pair', detail: 'Two outputs act as one stereo pair: one plays left, the other right.' },
+  { id: 'party_mono', label: 'Party mono', detail: 'Every output plays the same mono mix, so nobody misses a channel.' },
+];
+
+const POSITIONS: { id: SpeakerPosition; label: string }[] = [
+  { id: 'unassigned', label: 'Not set' },
+  { id: 'front_left', label: 'Front left' }, { id: 'front', label: 'Front' }, { id: 'front_right', label: 'Front right' },
+  { id: 'left', label: 'Left side' }, { id: 'right', label: 'Right side' },
+  { id: 'rear_left', label: 'Rear left' }, { id: 'rear', label: 'Rear' }, { id: 'rear_right', label: 'Rear right' },
+];
+
+const ROLES: { id: ChannelRole; label: string }[] = [
+  { id: 'stereo', label: 'Stereo' }, { id: 'swapped', label: 'Stereo (L/R swapped)' },
+  { id: 'left_only', label: 'Left channel only' }, { id: 'right_only', label: 'Right channel only' },
+  { id: 'mono', label: 'Mono mix' },
 ];
 
 const STATE_LABEL: Record<LifecycleState, string> = {
@@ -76,6 +96,27 @@ function profileNameProblem(name: string): string | null {
   return null;
 }
 
+/** Number input that commits on blur/Enter, keeps its text while focused, and can be blank. */
+function NumberField({ value, min, max, step, allowEmpty, label, width, onCommit }: {
+  value: number | null; min: number; max: number; step: number; allowEmpty?: boolean; label: string; width?: number;
+  onCommit: (v: number | null) => void;
+}) {
+  const show = (v: number | null) => (v == null ? '' : String(v));
+  const [text, setText] = useState(show(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setText(show(value)); }, [value, focused]);
+  const commit = () => {
+    if (text.trim() === '' && allowEmpty) { if (value != null) onCommit(null); return; }
+    const n = Number(text);
+    if (Number.isFinite(n) && n >= min && n <= max) { if (n !== value) onCommit(n); }
+    else setText(show(value));
+  };
+  return <input className="num-field" style={width ? { width } : undefined} type="number" min={min} max={max} step={step}
+    value={text} aria-label={label} placeholder={allowEmpty ? '-' : undefined}
+    onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); commit(); }}
+    onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />;
+}
+
 function fmt(n: number, digits = 0) { return Number.isFinite(n) ? n.toFixed(digits) : '—'; }
 
 function OutputCard({ endpoint, status, running, enabledCount, onAction }: {
@@ -113,6 +154,31 @@ function OutputCard({ endpoint, status, running, enabledCount, onAction }: {
       <label className="gain">Gain <GainSlider value={config.gain} disabled={config.muted}
         onCommit={v => onAction(() => api.volume(endpoint.id, v))} /><span className="num">{Math.round(config.gain * 100)}%</span></label>
       <label className="delay-label">Delay <DelayInput value={config.delay_ms} onCommit={v => onAction(() => api.delay(endpoint.id, v))} /> ms</label>
+    </div>}
+    {enabled && config && <div className="placement">
+      <label>Position
+        <select value={config.position} aria-label="Speaker position"
+          onChange={e => onAction(() => api.placement(endpoint.id, e.target.value as SpeakerPosition, config.distance_m))}>
+          {POSITIONS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      </label>
+      <label>Distance
+        <NumberField value={config.distance_m} min={MIN_DISTANCE_M} max={MAX_DISTANCE_M} step={0.1} allowEmpty width={70}
+          label="Distance from your seat in metres" onCommit={v => onAction(() => api.placement(endpoint.id, config.position, v))} /> m
+      </label>
+      <label>Plays
+        <select value={config.role} aria-label="Channels this output plays"
+          onChange={e => onAction(() => api.role(endpoint.id, e.target.value as ChannelRole))}>
+          {ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+      </label>
+      <label>Level
+        <NumberField value={config.trim_db} min={MIN_TRIM_DB} max={0} step={0.5} width={64}
+          label="Level trim in dB" onCommit={v => onAction(() => api.trim(endpoint.id, v ?? 0))} /> dB
+      </label>
+      {status && (status.placement_delay_ms > 0.05 || status.placement_level < 0.999) && <span className="placement-note">
+        Placement: +{fmt(status.placement_delay_ms, 1)} ms, {Math.round(status.placement_level * 100)}% level
+      </span>}
     </div>}
     {showMetrics && status && <dl className="metrics">
       <div><dt>Buffered</dt><dd>{fmt(status.buffered_ms)} ms</dd></div>
@@ -233,6 +299,28 @@ function App() {
           </div>
           <p className="hint">{MODES.find(m => m.id === snapshot?.mode)?.detail}</p>
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="setup-head">
+          <h2>Speaker setup</h2>
+          <label className="check">
+            <input type="checkbox" checked={snapshot?.distance_compensation ?? true}
+              onChange={e => act(() => api.distanceCompensation(e.target.checked))} />
+            Compensate for distance
+          </label>
+        </div>
+        <div className="presets" role="group" aria-label="Sound system preset">
+          {PRESETS.map(p => <button key={p.id} title={p.detail} disabled={enabledCount === 0}
+            onClick={() => act(() => api.preset(p.id))}>{p.label}</button>)}
+        </div>
+        <p className="hint">Presets set what each output plays and its level, and keep your gain, delay and positions. Set each output's position and distance from your seat on its card below. With distance compensation on, nearer speakers are delayed (2.9 ms per metre) and turned down so sound from every speaker reaches you together and evenly. If you already tuned delays with a microphone at your seat, the distance is already in that measurement, so turn compensation off.</p>
+        {(snapshot?.outputs ?? []).some(o => o.config.enabled) && <ul className="layout">
+          {(snapshot?.outputs ?? []).filter(o => o.config.enabled).map(o => <li key={o.endpoint_id}>
+            <strong>{POSITIONS.find(p => p.id === o.config.position)?.label}</strong> {o.name}
+            <span>{ROLES.find(r => r.id === o.config.role)?.label}{o.config.distance_m != null && `, ${o.config.distance_m} m`}{o.config.trim_db !== 0 && `, ${o.config.trim_db} dB`}</span>
+          </li>)}
+        </ul>}
       </section>
 
       <div className="section-head"><h2>Outputs</h2><span>{enabledCount} / {MAX_ENABLED_OUTPUTS} enabled · {active.length} available</span></div>

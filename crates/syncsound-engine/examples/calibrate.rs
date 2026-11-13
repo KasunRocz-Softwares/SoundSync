@@ -51,6 +51,7 @@ fn main() {
             gain: 1.0,
             muted: control,
             delay_ms: 0,
+            ..OutputConfig::new("")
         }])
         .unwrap();
     engine.start().unwrap();

@@ -22,6 +22,11 @@
     "allow-load-profile",
     "allow-list-profiles",
     "allow-rebind-profile-device",
-    "allow-export-diagnostics"
+    "allow-export-diagnostics",
+    "allow-set-device-placement",
+    "allow-set-device-role",
+    "allow-set-device-trim",
+    "allow-set-distance-compensation",
+    "allow-apply-sound-preset"
   ]
 }

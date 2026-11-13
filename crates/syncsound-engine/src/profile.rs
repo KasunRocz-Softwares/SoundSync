@@ -2,7 +2,8 @@
 //! friendly name: missing endpoints are reported and require an explicit rebind.
 use crate::capture::{AudioEndpoint, CaptureSource};
 use crate::commands::{validate_delay, validate_volume, CommandError};
-use crate::render::{AudioMode, MAX_ENABLED_OUTPUTS};
+use crate::placement::{validate_distance, validate_trim, SpeakerPosition};
+use crate::render::{AudioMode, ChannelRole, MAX_ENABLED_OUTPUTS};
 use crate::routing::{EngineSnapshot, OutputConfig};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -41,6 +42,14 @@ pub struct ProfileOutput {
     pub muted: bool,
     #[serde(default)]
     pub delay_ms: u32,
+    #[serde(default)]
+    pub role: ChannelRole,
+    #[serde(default)]
+    pub position: SpeakerPosition,
+    #[serde(default)]
+    pub distance_m: Option<f32>,
+    #[serde(default)]
+    pub trim_db: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,6 +60,31 @@ pub struct Profile {
     #[serde(default = "default_source")]
     pub source: ProfileSource,
     pub outputs: Vec<ProfileOutput>,
+    #[serde(default = "default_compensation")]
+    pub distance_compensation: bool,
+}
+
+impl ProfileOutput {
+    /// Placement defaults; tests fill the remaining fields with struct update syntax.
+    #[cfg(test)]
+    fn new() -> Self {
+        Self {
+            endpoint_id: String::new(),
+            name_hint: String::new(),
+            enabled: false,
+            gain: 1.0,
+            muted: false,
+            delay_ms: 0,
+            role: ChannelRole::Stereo,
+            position: SpeakerPosition::Unassigned,
+            distance_m: None,
+            trim_db: 0.0,
+        }
+    }
+}
+
+fn default_compensation() -> bool {
+    true
 }
 
 fn default_source() -> ProfileSource {
@@ -72,6 +106,7 @@ pub struct ProfileApplyPlan {
     pub missing_source: Option<String>,
     pub outputs: Vec<OutputConfig>,
     pub missing: Vec<MissingOutput>,
+    pub distance_compensation: bool,
 }
 
 pub fn validate_name(name: &str) -> Result<(), CommandError> {
@@ -80,7 +115,9 @@ pub fn validate_name(name: &str) -> Result<(), CommandError> {
         && name
             .chars()
             // All are valid in Windows file names; no '.', '/', '\' or ':' (no traversal).
-            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '+' | '&' | '(' | ')' | ','));
+            .all(|c| {
+                c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '+' | '&' | '(' | ')' | ',')
+            });
     if ok {
         Ok(())
     } else {
@@ -109,8 +146,13 @@ impl Profile {
                     gain: o.config.gain,
                     muted: o.config.muted,
                     delay_ms: o.config.delay_ms,
+                    role: o.config.role,
+                    position: o.config.position,
+                    distance_m: o.config.distance_m,
+                    trim_db: o.config.trim_db,
                 })
                 .collect(),
+            distance_compensation: snapshot.distance_compensation,
         };
         profile.validate()?;
         Ok(profile)
@@ -149,6 +191,10 @@ impl Profile {
             }
             validate_volume(f64::from(output.gain))?;
             validate_delay(i64::from(output.delay_ms))?;
+            if let Some(distance) = output.distance_m {
+                validate_distance(f64::from(distance))?;
+            }
+            validate_trim(f64::from(output.trim_db))?;
         }
         Ok(())
     }
@@ -211,6 +257,10 @@ impl Profile {
                     gain: output.gain,
                     muted: output.muted,
                     delay_ms: output.delay_ms,
+                    role: output.role,
+                    position: output.position,
+                    distance_m: output.distance_m,
+                    trim_db: output.trim_db,
                 });
             } else {
                 missing.push(MissingOutput {
@@ -226,6 +276,7 @@ impl Profile {
             missing_source,
             outputs,
             missing,
+            distance_compensation: self.distance_compensation,
         }
     }
 
@@ -351,6 +402,7 @@ mod tests {
             name: "Living room".into(),
             mode: AudioMode::Synchronized,
             source: ProfileSource::SystemExcludingSelf,
+            distance_compensation: true,
             outputs: vec![
                 ProfileOutput {
                     endpoint_id: "id-a".into(),
@@ -359,6 +411,7 @@ mod tests {
                     gain: 0.8,
                     muted: false,
                     delay_ms: 20,
+                    ..ProfileOutput::new()
                 },
                 ProfileOutput {
                     endpoint_id: "id-b".into(),
@@ -367,6 +420,7 @@ mod tests {
                     gain: 1.0,
                     muted: true,
                     delay_ms: 0,
+                    ..ProfileOutput::new()
                 },
             ],
         }
@@ -412,6 +466,7 @@ mod tests {
                 gain: 1.0,
                 muted: false,
                 delay_ms: 0,
+                ..ProfileOutput::new()
             })
             .collect();
         assert_eq!(
