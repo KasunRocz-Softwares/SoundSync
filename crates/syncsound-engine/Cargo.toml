@@ -10,4 +10,5 @@ serde.workspace = true
 thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows.workspace = true
+windows = { workspace = true, features = ["Win32_Devices_FunctionDiscovery", "Win32_System_Variant", "Win32_Media_KernelStreaming"] }
+windows-core = "0.62"

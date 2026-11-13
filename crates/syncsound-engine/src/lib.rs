@@ -1,12 +1,17 @@
-//! SyncSound audio engine v0.1: endpoint discovery and synchronized test-signal output.
-//! System-audio WASAPI loopback capture is not yet implemented. Do not claim system mirroring works.
+//! SyncSound audio primitives and Windows loopback capture.
+//! The desktop diagnostic tone is separate; synchronized system mirroring is not yet wired up.
 pub mod audio_format;
+pub mod capture;
+pub mod platform;
 pub mod dsp;
 pub mod metrics;
 pub mod ring_buffer;
 pub mod timeline;
 
 pub use audio_format::{PcmBlock, PcmFormat};
+pub use capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState};
+#[cfg(windows)]
+pub use capture::LoopbackCapture;
 pub use dsp::{map_channels, resample_interleaved, DelayLine};
 pub use ring_buffer::{BoundedPcmQueue, PcmConsumer, PcmProducer, QueueStatus};
 pub use timeline::{ClockEstimator, MasterTimeline};
