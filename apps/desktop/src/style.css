@@ -247,3 +247,15 @@ button.nav.active { background: #1c3840; color: #6ee7cf; }
 .calib-report td { padding: 8px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
 
 aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+
+/* Updater */
+.updater { display: grid; gap: 8px; font-size: 12px; }
+.update-card { background: #12332f; border: 1px solid #2f5b5a; border-radius: 10px; padding: 10px; display: grid; gap: 8px; color: #bff3e8; }
+.update-card p { margin: 0; color: #9fe8d9; font-size: 11.5px; }
+.update-card button { justify-content: center; font-size: 12.5px; padding: 7px 10px; }
+.update-note { margin: 0; color: var(--muted); }
+.update-note.bad { color: var(--bad); overflow-wrap: anywhere; }
+.link.small { font-size: 12px; padding: 2px 0; margin: 0; justify-content: flex-start; }
+.check.tiny { font-size: 12px; }
+.check.tiny input { width: 13px; height: 13px; }
+.version-line { color: var(--faint); }

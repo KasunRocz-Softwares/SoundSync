@@ -2,6 +2,7 @@ name: Windows Build
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 jobs:
   build:
@@ -18,7 +19,8 @@ jobs:
       - uses: swatinem/rust-cache@v2
       - run: npm ci
       - run: npm run build
-      - run: npm run desktop:build
+      # CI builds are unsigned for the updater; signed releases come from scripts/release.ps1.
+      - run: npm run desktop:build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@v4
         with:
           name: SyncSound-Windows-Installers

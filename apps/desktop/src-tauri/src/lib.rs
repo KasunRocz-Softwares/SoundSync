@@ -431,6 +431,9 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        // Signed auto-update from GitHub Releases (public key in tauri.conf.json).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Profiles and diagnostics live in per-user app data, never the install dir.
             let data = app.path().app_data_dir()?;

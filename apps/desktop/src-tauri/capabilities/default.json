@@ -36,6 +36,8 @@
     "allow-list-audio-apps",
     "allow-select-app-sources",
     "allow-list-microphones",
-    "allow-calibrate"
+    "allow-calibrate",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

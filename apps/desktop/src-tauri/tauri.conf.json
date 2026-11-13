@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SyncSound",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "cloud.syncsound.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "SyncSound v0.1 (Developer Preview)",
+        "title": "SyncSound",
         "width": 1180,
         "height": 820,
         "minWidth": 860,
@@ -32,14 +32,28 @@
     ],
     "publisher": "KR Softwares",
     "category": "Music",
-    "shortDescription": "Route Windows system audio to multiple outputs (developer preview)",
-    "longDescription": "SyncSound captures Windows audio with WASAPI loopback and plays it on several output devices at once, with per-output gain, mute, delay and estimated latency alignment. Latency figures are estimates from Windows-reported buffers; acoustic calibration is not included in v0.1.",
+    "shortDescription": "Play Windows audio on several speakers in sync",
+    "longDescription": "SyncSound captures Windows audio and plays it on up to eight speakers, headphones and Bluetooth devices at once, with microphone calibration, a room map with 7.1 and 8D audio, per-app routing and per-speaker EQ.",
     "icon": [
       "icons/icon.ico"
     ],
     "windows": {
       "nsis": {
         "installMode": "currentUser"
+      }
+    },
+    "createUpdaterArtifacts": true,
+    "copyright": "\u00a9 2026 KR Softwares",
+    "homepage": "https://github.com/KasunRocz-Softwares/SoundSync"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJCM0ZBNkVGRDkxQjlFRTAKUldUZ25odlo3NlkvdS9nZk1TbVU0bW90aWRQYTZOUlRhZ0tRTXNhOU82dEcxeGZxbHZ2bm5XUzcK",
+      "endpoints": [
+        "https://github.com/KasunRocz-Softwares/SoundSync/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -1,6 +1,6 @@
 [package]
 name = "syncsound-desktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -16,3 +16,5 @@ syncsound-engine = { path = "../../../crates/syncsound-engine" }
 serde.workspace = true
 serde_json.workspace = true
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

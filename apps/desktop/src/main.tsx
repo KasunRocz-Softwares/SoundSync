@@ -13,6 +13,7 @@ import { RoomMap } from './RoomMap';
 import { AppsPanel } from './AppsPanel';
 import { EqPanel } from './EqPanel';
 import { CalibrationCard } from './CalibrationCard';
+import { Updater } from './Updater';
 import './style.css';
 
 const MODES: { id: AudioMode; label: string; detail: string }[] = [
@@ -280,12 +281,12 @@ function App() {
   return <div className="shell">
     <aside>
       <div className="brand"><Headphones size={26} /> <span>SyncSound</span></div>
-      <p className="version">v0.1.0 · Developer Preview</p>
+      <p className="version">Developer Preview</p>
       <nav aria-label="Sections">
         {TABS.map(t => <button key={t.id} className={`nav ${tab === t.id ? 'active' : ''}`} aria-current={tab === t.id ? 'page' : undefined}
           onClick={() => setTab(t.id)}>{t.icon} {t.label}</button>)}
       </nav>
-      <div className="sidebar-bottom">Windows 11 · WASAPI shared mode<br />Profiles stored in your app data</div>
+      <div className="sidebar-bottom"><Updater /></div>
     </aside>
     <main>
       <header>

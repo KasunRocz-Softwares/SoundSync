@@ -89,6 +89,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -InstallD
 
 The build script fails if either `target/release/bundle/nsis/*.exe` or `target/release/bundle/msi/*.msi` is missing. The install script installs the NSIS build silently into the given directory, launches it, re-installs it when `-Upgrade` is set, and checks that profile data in app data survives. Installers are unsigned.
 
+## Download and updates
+
+Download the latest `SyncSound_x.y.z_x64-setup.exe` from [Releases](https://github.com/KasunRocz-Softwares/SoundSync/releases/latest) and run it. Windows SmartScreen may warn because the installer has no code-signing certificate; choose **More info → Run anyway**.
+
+SyncSound checks GitHub Releases for a newer version when it starts. You can turn this off, or check by hand, at the bottom of the sidebar. Updates are signed: the app installs only packages that verify against the public key built into it, then restarts. Your profiles stay in app data.
+
+### Publishing a release (maintainers)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scriptselease.ps1 -Version 0.2.1 -Notes "What changed" -Publish
+```
+
+The script bumps the version, runs the tests, builds the NSIS and MSI installers signed with the updater key (`%USERPROFILE%\.tauri\syncsound-updater.key`, never committed), writes `latest.json`, tags the release and uploads it with `gh`. Back up the key. Without it, existing installs cannot accept future updates.
+
 ## Known limitations
 
 - Windows process-exclusion loopback is system-wide. Excluding SyncSound while capturing one specific endpoint is not supported by the Windows API.
