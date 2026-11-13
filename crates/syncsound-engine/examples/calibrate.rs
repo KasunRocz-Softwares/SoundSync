@@ -24,6 +24,8 @@ fn main() {
     let control = args.get(4).map(String::as_str) == Some("muted");
     // Baseline: SyncSound routes nothing (output disabled, engine still running).
     let baseline = args.get(4).map(String::as_str) == Some("off");
+    // Observe: route nothing here; measure whatever the running SyncSound app plays.
+    let observe = args.get(4).map(String::as_str) == Some("observe");
     const RATE: u32 = 48_000;
     const CLICKS: usize = 8;
 
@@ -45,7 +47,7 @@ fn main() {
     engine
         .apply_outputs(vec![OutputConfig {
             endpoint_id: output.id.clone(),
-            enabled: !baseline,
+            enabled: !baseline && !observe,
             gain: 1.0,
             muted: control,
             delay_ms: 0,
@@ -57,6 +59,9 @@ fn main() {
     }
     if baseline {
         println!("BASELINE RUN: SyncSound output disabled");
+    }
+    if observe {
+        println!("OBSERVE RUN: measuring the running SyncSound app only");
     }
     std::thread::sleep(Duration::from_secs(2));
     let snapshot = engine.snapshot();

@@ -53,6 +53,17 @@ Setup chosen by the user: Windows default = Speakers (Realtek), which Windows pl
 
 **Result: at the listening position the iOX 2 plays about 346–350 ms after the Realtek speakers.** SyncSound's own share is the buffer in Gaming mode, about 20 ms plus the endpoint buffer. Most of the gap is Bluetooth codec and radio delay, which Windows does not report. While Realtek stays the Windows default, nothing can delay it, so this gap remains.
 
+### Aligned setup
+
+The user set the Windows default output to 34E6UC (monitor speakers turned down), so the app now plays both Realtek and iOX 2 and can delay Realtek. Measured with `calibrate ... observe`, which plays clicks and records but does no routing of its own:
+
+| Realtek delay | Result at the listening position |
+|---|---|
+| 330 ms | Two arrivals 76 ms apart; Realtek (the stronger one) was the later of the two |
+| 254 ms | One dominant arrival (43× noise). The weaker iOX 2 arrival is within about 10–18 ms of it, too close to hear as an echo |
+
+Saved as the profile `Front Realtek Rear iOX 2`: Gaming mode, source = Windows default, iOX 2 at 0 ms, Realtek at 254 ms. Total delay from the original playback is roughly 350 ms, so this setup suits music better than video or games.
+
 Also found: the installed app allows a second instance to run, and both instances can mirror audio at the same time.
 
 ## Install at F:\SyncSound
