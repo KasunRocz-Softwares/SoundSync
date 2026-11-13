@@ -3,7 +3,7 @@
   --text: #e9eef7; --muted: #9ca9bd; --faint: #7d8ba1;
   --accent: #2fc4ab; --accent-strong: #0d9488; --accent-soft: #1a4140;
   --warn: #f2c46d; --warn-bg: #2c271b; --bad: #ffb7b7; --bad-bg: #4b2329;
-  font-family: Inter, "Segoe UI", Arial, sans-serif; color: var(--text); background: var(--bg); font-synthesis: none;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--text); background: var(--bg); font-synthesis: none;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); }

@@ -1,1 +1,46 @@
-{"$schema":"https://schema.tauri.app/config/2","productName":"SyncSound","version":"0.1.0","identifier":"cloud.syncsound.desktop","build":{"beforeDevCommand":"npm run dev","devUrl":"http://localhost:1420","beforeBuildCommand":"npm run build","frontendDist":"../../../dist"},"app":{"windows":[{"title":"SyncSound v0.1","width":1100,"height":760,"minWidth":850,"minHeight":600}],"security":{"csp":null}},"bundle":{"active":true,"targets":["nsis","msi"],"shortDescription":"Multi-device Windows audio prototype","category":"Music"}}
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SyncSound",
+  "version": "0.1.0",
+  "identifier": "cloud.syncsound.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../../../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "SyncSound v0.1 (Developer Preview)",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 860,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "publisher": "KR Softwares",
+    "category": "Music",
+    "shortDescription": "Route Windows system audio to multiple outputs (developer preview)",
+    "longDescription": "SyncSound captures Windows audio with WASAPI loopback and plays it on several output devices at once, with per-output gain, mute, delay and estimated latency alignment. Latency figures are estimates from Windows-reported buffers; acoustic calibration is not included in v0.1.",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}
