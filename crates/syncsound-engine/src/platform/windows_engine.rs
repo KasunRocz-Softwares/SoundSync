@@ -4,7 +4,11 @@
 //! handle is Send + Sync so Tauri can share it.
 use super::windows::{CaptureError, EndpointCatalog, LoopbackCapture};
 use super::windows_apps::list_audio_apps;
+use super::windows_mic::{list_microphones, MicRecorder, Microphone};
 use super::windows_render::{RenderWorker, WorkerPoll};
+use crate::calibration::{
+    analyze_output, click_sample, soloed_output, solve_delays, total_frames, CalibratedOutput,
+};
 use crate::capture::AudioApp;
 use crate::capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState, EndpointState};
 use crate::eq::{design, EqSettings};
@@ -20,6 +24,7 @@ use crate::routing::{
     alignment_frames, latency_warning, metrics_ms, EngineSnapshot, ErrorRecord, OutputConfig,
     OutputStatus,
 };
+use crate::routing::{CalibrationProgress, CalibrationReport};
 use crate::spatial::{
     nearest_position, position_azimuth, wrap_deg, SpatialConfig, SpatialShared, StereoSpread,
     MAX_POINTS,
@@ -73,6 +78,8 @@ enum Command {
     SetSpatial(SpatialConfig, Reply<()>),
     SetEq(String, EqSettings, Reply<()>),
     ListApps(Reply<Vec<AudioApp>>),
+    ListMics(Reply<Vec<Microphone>>),
+    Calibrate(String, Reply<CalibrationReport>),
     ApplyPreset(SoundPreset, Reply<()>),
     Refresh(Reply<Vec<AudioEndpoint>>),
     Shutdown,
@@ -117,6 +124,14 @@ impl AudioEngine {
     }
 
     fn call<T>(&self, make: impl FnOnce(Reply<T>) -> Command) -> Result<T, EngineError> {
+        self.call_timeout(make, Duration::from_secs(10))
+    }
+
+    fn call_timeout<T>(
+        &self,
+        make: impl FnOnce(Reply<T>) -> Command,
+        timeout: Duration,
+    ) -> Result<T, EngineError> {
         let (reply, result) = mpsc::sync_channel(1);
         self.commands
             .lock()
@@ -124,7 +139,7 @@ impl AudioEngine {
             .send(make(reply))
             .map_err(|_| EngineError::Disconnected)?;
         result
-            .recv_timeout(Duration::from_secs(10))
+            .recv_timeout(timeout)
             .map_err(|_| EngineError::Disconnected)?
     }
 
@@ -199,6 +214,14 @@ impl AudioEngine {
     pub fn set_subwoofer(&self, id: String, on: bool) -> Result<(), EngineError> {
         self.call(|r| Command::SetSubwoofer(id, on, r))
     }
+    pub fn list_microphones(&self) -> Result<Vec<Microphone>, EngineError> {
+        self.call(Command::ListMics)
+    }
+    /// Plays a click track through each enabled output in turn, records it with
+    /// `mic_id` and applies per-output delays. Blocks for about 6 s per output.
+    pub fn calibrate(&self, mic_id: String) -> Result<CalibrationReport, EngineError> {
+        self.call_timeout(|r| Command::Calibrate(mic_id, r), Duration::from_secs(90))
+    }
     /// Applications that currently have an audio session.
     pub fn list_apps(&self) -> Result<Vec<AudioApp>, EngineError> {
         self.call(Command::ListApps)
@@ -238,6 +261,18 @@ struct OutputSlot {
     published_eq: Option<EqSettings>,
 }
 
+struct CalibrationRun {
+    order: Vec<String>,
+    names: Vec<String>,
+    recorder: MicRecorder,
+    mic_name: String,
+    started: Instant,
+    generated: u64,
+    total: u64,
+    frame_base: u64,
+    reply: Reply<CalibrationReport>,
+}
+
 struct AppCapture {
     exe: String,
     pid: u32,
@@ -262,6 +297,9 @@ struct Core {
     mixer: TimelineMixer,
     mix_out: Vec<f32>,
     last_app_check: Instant,
+    calibration: Option<CalibrationRun>,
+    click_block: Vec<f32>,
+    silent_block: Vec<f32>,
     scratch: Vec<f32>,
     errors: VecDeque<ErrorRecord>,
     started: Instant,
@@ -294,6 +332,9 @@ impl Core {
             mixer: TimelineMixer::new(usize::from(format.channels), 24_000, 960),
             mix_out: vec![0.0; 480 * usize::from(format.channels)],
             last_app_check: now,
+            calibration: None,
+            click_block: vec![0.0; 480 * usize::from(format.channels)],
+            silent_block: vec![0.0; 480 * usize::from(format.channels)],
             scratch: vec![
                 0.0;
                 CaptureConfig::default().max_block_frames * usize::from(format.channels)
@@ -477,6 +518,15 @@ impl Core {
             Command::SetSubwoofer(id, on, reply) => {
                 let _ = reply.send(self.slot(&id).map(|s| s.config.subwoofer = on));
             }
+            Command::ListMics(reply) => {
+                let _ = reply
+                    .send(list_microphones().map_err(|e| EngineError::Platform(e.to_string())));
+            }
+            Command::Calibrate(mic_id, reply) => {
+                if let Err(error) = self.start_calibration(mic_id, reply.clone()) {
+                    let _ = reply.send(Err(error));
+                }
+            }
             Command::ListApps(reply) => {
                 let _ =
                     reply.send(list_audio_apps().map_err(|e| EngineError::Platform(e.to_string())));
@@ -632,6 +682,11 @@ impl Core {
         }
         self.capture = None;
         self.app_captures.clear();
+        if let Some(run) = self.calibration.take() {
+            let _ = run.reply.send(Err(EngineError::Platform(
+                "Calibration was cancelled because routing stopped".into(),
+            )));
+        }
     }
 
     fn restart_capture(&mut self) {
@@ -803,12 +858,14 @@ impl Core {
         }
         // 1. Service capture and fan out PCM. Full output queues drop only for that output.
         let mut capture_error = None;
+        let calibrating = self.calibration.is_some();
         if let Some((capture, consumer)) = &mut self.capture {
             if let Err(error) = capture.poll() {
                 capture_error = Some(error.to_string());
             }
             loop {
                 match consumer.pop_into(&mut self.scratch) {
+                    Ok(_) if calibrating => {}
                     Ok((first, frames)) => {
                         let samples = &self.scratch[..frames * usize::from(self.format.channels)];
                         for slot in self.outputs.values_mut() {
@@ -827,6 +884,7 @@ impl Core {
             self.record("capture", message);
         }
         self.service_app_captures();
+        self.service_calibration();
 
         // 2. Supervise workers; one failure never touches other outputs.
         let now = Instant::now();
@@ -903,6 +961,9 @@ impl Core {
             self.record("capture", e);
         }
         while let Some(first) = self.mixer.pop(&mut self.mix_out) {
+            if self.calibration.is_some() {
+                continue;
+            }
             for slot in self.outputs.values_mut() {
                 if let Some(producer) = &mut slot.producer {
                     if producer.push_samples(first, &self.mix_out) == QueueStatus::Full {
@@ -927,6 +988,176 @@ impl Core {
                 self.restart_capture();
             }
         }
+    }
+
+    fn start_calibration(
+        &mut self,
+        mic_id: String,
+        reply: Reply<CalibrationReport>,
+    ) -> Result<(), EngineError> {
+        let fail = |m: &str| EngineError::Platform(m.into());
+        if self.calibration.is_some() {
+            return Err(fail("Calibration is already running"));
+        }
+        if !self.running {
+            return Err(fail("Start routing first, then calibrate"));
+        }
+        let order: Vec<String> = self
+            .outputs
+            .values()
+            .filter(|s| {
+                s.config.enabled
+                    && !s.config.muted
+                    && s.lifecycle.state() == OutputLifecycleState::Running
+            })
+            .map(|s| s.config.endpoint_id.clone())
+            .collect();
+        if order.len() < 2 {
+            return Err(fail(
+                "Calibration needs at least two playing, unmuted outputs",
+            ));
+        }
+        let mics = list_microphones().map_err(|e| fail(&e.to_string()))?;
+        let mic = mics
+            .iter()
+            .find(|m| m.id == mic_id)
+            .ok_or_else(|| fail("Microphone not found"))?;
+        let recorder =
+            MicRecorder::start(mic.id.clone(), self.format.sample_rate).map_err(|e| fail(&e))?;
+        // Full gain, spatial off: the measurement needs each click loud and whole.
+        for id in &order {
+            if let Some(slot) = self.outputs.get(id) {
+                slot.controls.set_gain(1.0);
+            }
+        }
+        let mut config = self.spatial_config;
+        config.enabled = false;
+        self.spatial.set(config, &[]);
+        let rate = self.format.sample_rate;
+        let names = order.iter().map(|id| self.display_name(id)).collect();
+        self.calibration = Some(CalibrationRun {
+            total: total_frames(order.len(), rate),
+            order,
+            names,
+            recorder,
+            mic_name: mic.name.clone(),
+            started: Instant::now(),
+            generated: 0,
+            frame_base: 1 << 40,
+            reply,
+        });
+        Ok(())
+    }
+
+    /// Generates the click track in real time and finishes the run.
+    fn service_calibration(&mut self) {
+        let Some(run) = &mut self.calibration else {
+            return;
+        };
+        let rate = self.format.sample_rate;
+        let ch = usize::from(self.format.channels);
+        let block = (self.click_block.len() / ch) as u64;
+        let due = (run.started.elapsed().as_secs_f64() * f64::from(rate)) as u64;
+        while run.generated + block <= due.min(run.total) {
+            let soloed = soloed_output(run.generated, run.order.len(), rate);
+            for i in 0..block {
+                let x = click_sample(run.generated + i, rate);
+                self.click_block[i as usize * ch..(i as usize + 1) * ch].fill(x);
+            }
+            let first = run.frame_base + run.generated;
+            for (index, id) in run.order.iter().enumerate() {
+                if let Some(producer) = self.outputs.get_mut(id).and_then(|s| s.producer.as_mut()) {
+                    let samples = if soloed == Some(index) {
+                        &self.click_block
+                    } else {
+                        &self.silent_block
+                    };
+                    let _ = producer.push_samples(first, samples);
+                }
+            }
+            run.generated += block;
+        }
+        // Let the last clicks reach the microphone (outputs may lag ~1 s).
+        let tail = Duration::from_millis(1_500);
+        let total_time = Duration::from_secs_f64(run.total as f64 / f64::from(rate));
+        if run.generated < run.total || run.started.elapsed() < total_time + tail {
+            return;
+        }
+        let run = self.calibration.take().unwrap();
+        let report = self.finish_calibration(
+            run.order,
+            run.names,
+            run.recorder,
+            run.mic_name,
+            run.started,
+        );
+        // Restore gains and the spatial field.
+        for slot in self.outputs.values() {
+            slot.controls.set_gain(slot.config.gain);
+        }
+        self.recompute_placement();
+        let _ = run.reply.send(report);
+    }
+
+    fn finish_calibration(
+        &mut self,
+        order: Vec<String>,
+        names: Vec<String>,
+        recorder: MicRecorder,
+        mic_name: String,
+        started: Instant,
+    ) -> Result<CalibrationReport, EngineError> {
+        let rate = self.format.sample_rate;
+        let mic_started = recorder.started_at;
+        let recording = recorder.finish().map_err(EngineError::Platform)?;
+        let offset = started.saturating_duration_since(mic_started).as_secs_f64()
+            - mic_started.saturating_duration_since(started).as_secs_f64();
+        let track_start = (offset * f64::from(rate)).round() as i64;
+        let arrivals: Vec<_> = (0..order.len())
+            .map(|k| analyze_output(&recording, rate, track_start, k))
+            .collect();
+        let current: Vec<u32> = order
+            .iter()
+            .map(|id| self.outputs.get(id).map_or(0, |s| s.config.delay_ms))
+            .collect();
+        let (relative, delays) = solve_delays(&arrivals, &current);
+        let detected = relative.iter().filter(|r| r.is_some()).count();
+        let applied = detected >= 2;
+        if applied {
+            for (id, delay) in order.iter().zip(&delays) {
+                if let Some(slot) = self.outputs.get_mut(id) {
+                    slot.config.delay_ms = *delay;
+                    slot.controls.set_delay_frames(ms_to_frames(*delay, rate));
+                }
+            }
+        }
+        let outputs = order
+            .iter()
+            .enumerate()
+            .map(|(k, id)| CalibratedOutput {
+                endpoint_id: id.clone(),
+                name: names[k].clone(),
+                detected: relative[k].is_some(),
+                snr: arrivals[k].map_or(0.0, |a| a.snr),
+                relative_ms: relative[k],
+                old_delay_ms: current[k],
+                new_delay_ms: if applied { delays[k] } else { current[k] },
+            })
+            .collect();
+        let message = if applied {
+            format!("Aligned {detected} outputs using {mic_name}.")
+        } else {
+            format!(
+                "Heard {detected} of {} outputs clearly — no delays changed. Turn the speakers up, keep the room quiet and hold the microphone at your seat.",
+                order.len()
+            )
+        };
+        Ok(CalibrationReport {
+            microphone: mic_name,
+            applied,
+            message,
+            outputs,
+        })
     }
 
     fn display_name(&self, id: &str) -> String {
@@ -1035,6 +1266,15 @@ impl Core {
             distance_compensation: self.distance_compensation,
             spatial: self.spatial_config,
             app_sources,
+            calibration: self.calibration.as_ref().map(|run| {
+                let rate = f64::from(self.format.sample_rate);
+                let soloed = soloed_output(run.generated, run.order.len(), self.format.sample_rate);
+                CalibrationProgress {
+                    elapsed_s: run.started.elapsed().as_secs_f64(),
+                    total_s: run.total as f64 / rate + 1.5,
+                    playing: soloed.map(|k| run.names[k].clone()),
+                }
+            }),
             endpoints: self.endpoints.clone(),
             recent_errors: self.errors.iter().cloned().collect(),
             updated_at_ms: self.started.elapsed().as_millis() as u64,

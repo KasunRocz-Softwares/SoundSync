@@ -4,14 +4,17 @@ use serde::Serialize;
 use std::path::PathBuf;
 use syncsound_engine::capture::{AudioApp, CaptureSource};
 use syncsound_engine::capture::{AudioEndpoint, CaptureState};
+use syncsound_engine::commands::MAX_ENDPOINT_ID_LEN;
 use syncsound_engine::commands::{
     parse_mode, parse_source, validate_delay, validate_enable, validate_endpoint_id,
     validate_volume, CommandError,
 };
 use syncsound_engine::eq::EqSettings;
 use syncsound_engine::placement::{validate_distance, validate_trim, SoundPreset, SpeakerPosition};
+use syncsound_engine::platform::windows_mic::Microphone;
 use syncsound_engine::profile::{MissingOutput, Profile, ProfileStore};
 use syncsound_engine::render::{AudioMode, ChannelRole};
+use syncsound_engine::routing::CalibrationReport;
 use syncsound_engine::spatial::{
     validate_azimuth, validate_spatial, SourceLayout, SpatialConfig, StereoSpread,
 };
@@ -236,6 +239,29 @@ async fn set_spatial(
 }
 
 #[tauri::command]
+async fn list_microphones(state: State<'_, AppState>) -> CmdResult<Vec<Microphone>> {
+    state.engine.list_microphones().map_err(engine_error)
+}
+
+/// Runs the click-track calibration (about 6 s per output) and applies delays.
+#[tauri::command]
+async fn calibrate(mic_id: String, state: State<'_, AppState>) -> CmdResult<CalibrationReport> {
+    if mic_id.is_empty()
+        || mic_id.len() > MAX_ENDPOINT_ID_LEN
+        || mic_id.chars().any(char::is_control)
+    {
+        return Err(CommandError::new(
+            "invalid_id",
+            "Microphone ID is malformed",
+        ));
+    }
+    state
+        .engine
+        .calibrate(mic_id)
+        .map_err(|e| CommandError::new("calibration", e.to_string()))
+}
+
+#[tauri::command]
 async fn list_audio_apps(state: State<'_, AppState>) -> CmdResult<Vec<AudioApp>> {
     state.engine.list_apps().map_err(engine_error)
 }
@@ -444,7 +470,9 @@ pub fn run() {
             set_spatial,
             set_device_eq,
             list_audio_apps,
-            select_app_sources
+            select_app_sources,
+            list_microphones,
+            calibrate
         ])
         .build(tauri::generate_context!())
         .expect("error while building SyncSound");

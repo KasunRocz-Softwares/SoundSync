@@ -67,7 +67,7 @@ impl<T> Drop for ComMemory<T> {
     }
 }
 
-fn device_id(device: &IMMDevice) -> windows::core::Result<String> {
+pub(crate) fn device_id(device: &IMMDevice) -> windows::core::Result<String> {
     unsafe {
         let id = device.GetId()?;
         let _memory = ComMemory(id.0);

@@ -34,6 +34,8 @@
     "allow-set-spatial",
     "allow-set-device-eq",
     "allow-list-audio-apps",
-    "allow-select-app-sources"
+    "allow-select-app-sources",
+    "allow-list-microphones",
+    "allow-calibrate"
   ]
 }

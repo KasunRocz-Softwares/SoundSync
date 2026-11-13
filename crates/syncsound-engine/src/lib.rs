@@ -5,6 +5,7 @@
 //! Synchronization is estimated from Windows-reported buffer and stream latency; it
 //! is not an acoustic measurement and never claims zero latency.
 pub mod audio_format;
+pub mod calibration;
 pub mod capture;
 pub mod commands;
 pub mod diagnostics;

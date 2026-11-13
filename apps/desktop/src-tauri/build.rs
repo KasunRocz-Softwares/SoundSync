@@ -30,6 +30,8 @@ const COMMANDS: &[&str] = &[
     "set_device_eq",
     "list_audio_apps",
     "select_app_sources",
+    "list_microphones",
+    "calibrate",
 ];
 
 fn main() {

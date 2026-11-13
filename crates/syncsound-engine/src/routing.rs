@@ -90,6 +90,23 @@ pub struct OutputStatus {
     pub warning: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationProgress {
+    pub elapsed_s: f64,
+    pub total_s: f64,
+    /// Output currently playing clicks.
+    pub playing: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationReport {
+    pub microphone: String,
+    /// Delays were changed (at least two outputs were heard clearly).
+    pub applied: bool,
+    pub message: String,
+    pub outputs: Vec<crate::calibration::CalibratedOutput>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppSourceStatus {
     pub exe: String,
@@ -117,6 +134,8 @@ pub struct EngineSnapshot {
     pub spatial: SpatialConfig,
     /// Per-app routing status (source = Apps).
     pub app_sources: Vec<AppSourceStatus>,
+    /// Present while a microphone calibration is running.
+    pub calibration: Option<CalibrationProgress>,
     pub endpoints: Vec<AudioEndpoint>,
     pub recent_errors: Vec<ErrorRecord>,
     pub updated_at_ms: u64,
@@ -134,6 +153,7 @@ impl EngineSnapshot {
             distance_compensation: true,
             spatial: SpatialConfig::default(),
             app_sources: Vec::new(),
+            calibration: None,
             endpoints: Vec::new(),
             recent_errors: Vec::new(),
             updated_at_ms: 0,
