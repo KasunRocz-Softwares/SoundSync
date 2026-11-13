@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, AlertTriangle, Download, FolderOpen, Headphones, Play, Power, RefreshCw, Save, Volume2, VolumeX,
+  Activity, AlertTriangle, AppWindow, SlidersHorizontal, Speaker, Download, FolderOpen, Headphones, Play, Power, RefreshCw, Save, Volume2, VolumeX,
 } from 'lucide-react';
 import { api, errorMessage, type SourceKind } from './api';
 import {
@@ -10,6 +10,9 @@ import {
   type LifecycleState, type OutputStatus, type ProfileLoadReport, type SoundPreset, type SpeakerPosition,
 } from './types';
 import { RoomMap } from './RoomMap';
+import { AppsPanel } from './AppsPanel';
+import { EqPanel } from './EqPanel';
+import { CalibrationCard } from './CalibrationCard';
 import './style.css';
 
 const MODES: { id: AudioMode; label: string; detail: string }[] = [
@@ -45,7 +48,20 @@ const STATE_LABEL: Record<LifecycleState, string> = {
 function sourceValue(source: CaptureSource): string {
   if (source === 'DefaultRender') return 'default';
   if (source === 'SystemExcludingSelf') return 'system_excluding_self';
-  return `endpoint:${source.Endpoint}`;
+  if ('Endpoint' in source) return `endpoint:${source.Endpoint}`;
+  return 'apps';
+}
+
+type Tab = 'routing' | 'speakers' | 'apps' | 'eq';
+const TABS: { id: Tab; label: string; title: string; subtitle: string; icon: React.ReactNode }[] = [
+  { id: 'routing', label: 'Routing', title: 'Audio routing', subtitle: 'Capture Windows audio once and play it on several outputs at the same time.', icon: <Activity size={17} /> },
+  { id: 'speakers', label: 'Speaker setup', title: 'Speaker setup', subtitle: 'Place your speakers, choose a sound system, and calibrate with a microphone.', icon: <Speaker size={17} /> },
+  { id: 'apps', label: 'Apps', title: 'App routing', subtitle: 'Send only the apps you choose to your outputs.', icon: <AppWindow size={17} /> },
+  { id: 'eq', label: 'Equalizer', title: 'Equalizer', subtitle: 'Bass, mid, treble and low cut for each speaker.', icon: <SlidersHorizontal size={17} /> },
+];
+function savedTab(): Tab {
+  try { const t = localStorage.getItem('syncsound.tab'); if (TABS.some(x => x.id === t)) return t as Tab; } catch { /* storage unavailable */ }
+  return 'routing';
 }
 
 function captureText(state: CaptureState, endpoints: AudioEndpoint[]): { text: string; tone: 'ok' | 'warn' | 'bad' | 'idle' } {
@@ -53,7 +69,9 @@ function captureText(state: CaptureState, endpoints: AudioEndpoint[]): { text: s
   if (state === 'Stopped') return { text: 'Capture stopped', tone: 'idle' };
   if ('Capturing' in state) {
     const t = state.Capturing;
-    return { text: t === 'SystemExcludingSelf' ? 'Capturing all apps except SyncSound' : `Capturing ${name(t.Endpoint)}`, tone: 'ok' };
+    if (t === 'SystemExcludingSelf') return { text: 'Capturing all apps except SyncSound', tone: 'ok' };
+    if ('App' in t) return { text: 'Capturing the selected apps (see the Apps tab)', tone: 'ok' };
+    return { text: `Capturing ${name(t.Endpoint)}`, tone: 'ok' };
   }
   if ('Starting' in state) return { text: 'Starting capture…', tone: 'idle' };
   if ('Blocked' in state) return { text: `Capture blocked — ${state.Blocked.reason}. Use “All apps except SyncSound” or pick a source that is not an enabled output.`, tone: 'bad' };
@@ -210,6 +228,9 @@ function App() {
   const [rebindTargets, setRebindTargets] = useState<Record<string, string>>({});
   const [info, setInfo] = useState('');
   const [profileMessage, setProfileMessage] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+  const [tab, setTabState] = useState<Tab>(savedTab);
+  const setTab = (t: Tab) => { setTabState(t); try { localStorage.setItem('syncsound.tab', t); } catch { /* ignore */ } };
+  const current = TABS.find(t => t.id === tab)!;
 
   const poll = useCallback(async () => {
     try { setSnapshot(await api.status()); } catch (e) { setError(errorMessage(e)); }
@@ -252,6 +273,7 @@ function App() {
 
   function changeSource(value: string) {
     const [kind, ...rest] = value.split(':');
+    if (kind === 'apps') { setTab('apps'); return; }
     act(() => api.selectSource(kind as SourceKind, kind === 'endpoint' ? rest.join(':') : undefined));
   }
 
@@ -259,12 +281,15 @@ function App() {
     <aside>
       <div className="brand"><Headphones size={26} /> <span>SyncSound</span></div>
       <p className="version">v0.1.0 · Developer Preview</p>
-      <div className="nav active"><Activity size={17} /> Audio routing</div>
+      <nav aria-label="Sections">
+        {TABS.map(t => <button key={t.id} className={`nav ${tab === t.id ? 'active' : ''}`} aria-current={tab === t.id ? 'page' : undefined}
+          onClick={() => setTab(t.id)}>{t.icon} {t.label}</button>)}
+      </nav>
       <div className="sidebar-bottom">Windows 11 · WASAPI shared mode<br />Profiles stored in your app data</div>
     </aside>
     <main>
       <header>
-        <div><h1>Audio routing</h1><p>Capture Windows audio once and play it on several outputs at the same time.</p></div>
+        <div><h1>{current.title}</h1><p>{current.subtitle}</p></div>
         <div className="header-actions">
           <button onClick={refresh} disabled={busy}><RefreshCw size={16} /> Refresh devices</button>
           <button className={running ? 'stop' : 'start'} onClick={() => act(running ? api.stop : api.start)}>
@@ -273,14 +298,15 @@ function App() {
         </div>
       </header>
 
-      <section className="notice"><AlertTriangle size={19} /><div>
+      {tab === 'routing' && <section className="notice"><AlertTriangle size={19} /><div>
         <strong>Developer preview.</strong>
-        <p>Latency and alignment figures are estimates from Windows-reported buffer sizes. They do not include Bluetooth or HDMI transport delay or speaker distance, and acoustic (microphone) calibration is not part of v0.1. Use the per-output delay to fine-tune by ear.</p>
-      </div></section>
+        <p>Latency figures on the cards are estimates from Windows-reported buffer sizes and do not include Bluetooth or HDMI transport delay or speaker distance. For real alignment, use Calibrate on the Speaker setup tab with a microphone at your seat.</p>
+      </div></section>}
 
       {error && <div className="error" role="alert">{error}</div>}
       {info && <div className="info" role="status" onClick={() => setInfo('')}>{info}</div>}
 
+      {tab === 'routing' && <>
       <section className="panel grid2">
         <div>
           <h2>Source</h2>
@@ -288,6 +314,7 @@ function App() {
             <option value="default">Windows default output (follows changes)</option>
             <option value="system_excluding_self">All apps except SyncSound (system-wide)</option>
             {active.map(e => <option key={e.id} value={`endpoint:${e.id}`}>Pinned: {e.name}</option>)}
+            <option value="apps">Selected apps only (choose on the Apps tab)</option>
           </select>
           <p className="hint">A device used as the source cannot also be an output — that would feed SyncSound back into itself. To include your default speakers, choose “All apps except SyncSound”; note those speakers already play the original audio directly.</p>
           {capture && <p className={`capture ${capture.tone}`}><span className="dot" />{capture.text}</p>}
@@ -302,9 +329,11 @@ function App() {
         </div>
       </section>
 
+      </>}
+      {tab === 'speakers' && <>
       <section className="panel">
         <div className="setup-head">
-          <h2>Speaker setup</h2>
+          <h2>Speakers and sound system</h2>
           <label className="check">
             <input type="checkbox" checked={snapshot?.distance_compensation ?? true}
               onChange={e => act(() => api.distanceCompensation(e.target.checked))} />
@@ -324,6 +353,9 @@ function App() {
         </ul>}
         <RoomMap snapshot={snapshot} act={act} />
       </section>
+      <CalibrationCard snapshot={snapshot} onDone={() => void poll()} />
+      </>}
+      {tab === 'routing' && <>
 
       <div className="section-head"><h2>Outputs</h2><span>{enabledCount} / {MAX_ENABLED_OUTPUTS} enabled · {active.length} available</span></div>
       <div className="devices">
@@ -390,6 +422,10 @@ function App() {
           </details>}
         </div>
       </section>
+
+      </>}
+      {tab === 'apps' && <AppsPanel snapshot={snapshot} act={act} />}
+      {tab === 'eq' && <EqPanel snapshot={snapshot} act={act} />}
 
       <footer>
         <span>Capture format {snapshot ? `${snapshot.capture_format.sample_rate.toLocaleString()} Hz · ${snapshot.capture_format.channels} ch float` : '—'}</span>

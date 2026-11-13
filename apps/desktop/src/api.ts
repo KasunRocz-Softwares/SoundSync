@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpatialConfig,
-  SpeakerPosition, StereoSpread,
+  SpeakerPosition, StereoSpread, EqSettings, AudioApp, Microphone, CalibrationReport,
 } from './types';
 
 export function errorMessage(error: unknown): string {
@@ -40,6 +40,11 @@ export const api = {
     invoke<void>('set_device_map_placement', { id, azimuthDeg, distanceM }),
   spread: (id: string, spread: StereoSpread) => invoke<void>('set_device_spread', { id, spread }),
   subwoofer: (id: string, on: boolean) => invoke<void>('set_device_subwoofer', { id, on }),
+  eq: (id: string, eq: EqSettings) => invoke<void>('set_device_eq', { id, eq }),
+  apps: () => invoke<AudioApp[]>('list_audio_apps'),
+  selectApps: (exes: string[]) => invoke<void>('select_app_sources', { exes }),
+  mics: () => invoke<Microphone[]>('list_microphones'),
+  calibrate: (micId: string) => invoke<CalibrationReport>('calibrate', { micId }),
   spatial: (c: SpatialConfig) =>
     invoke<void>('set_spatial', { enabled: c.enabled, layout: c.layout, rotationS: c.rotation_s, clockwise: c.clockwise }),
 };

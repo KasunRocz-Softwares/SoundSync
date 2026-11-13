@@ -13,8 +13,10 @@ export type AudioEndpoint = {
   bus: string | null;
 };
 
-export type CaptureSource = 'DefaultRender' | 'SystemExcludingSelf' | { Endpoint: string };
-export type CaptureTarget = 'SystemExcludingSelf' | { Endpoint: string };
+export type CaptureSource =
+  | 'DefaultRender' | 'SystemExcludingSelf' | { Endpoint: string }
+  | { App: { exe: string; pid: number } } | { Apps: string[] };
+export type CaptureTarget = 'SystemExcludingSelf' | { Endpoint: string } | { App: number };
 export type CaptureState =
   | 'Stopped'
   | { Starting: CaptureTarget }
@@ -37,8 +39,19 @@ export type SpatialConfig = { enabled: boolean; layout: SourceLayout; rotation_s
 export type OutputConfig = {
   endpoint_id: string; enabled: boolean; gain: number; muted: boolean; delay_ms: number;
   role: ChannelRole; position: SpeakerPosition; distance_m: number | null; trim_db: number;
-  azimuth_deg: number | null; spread: StereoSpread; subwoofer: boolean;
+  azimuth_deg: number | null; spread: StereoSpread; subwoofer: boolean; eq: EqSettings;
 };
+
+export type EqSettings = { enabled: boolean; low_cut_hz: number; bass_db: number; mid_db: number; treble_db: number };
+export type AudioApp = { exe: string; name: string; pid: number; active: boolean };
+export type AppSourceStatus = { exe: string; pid: number | null; capturing: boolean };
+export type Microphone = { id: string; name: string; is_default: boolean };
+export type CalibrationProgress = { elapsed_s: number; total_s: number; playing: string | null };
+export type CalibratedOutput = {
+  endpoint_id: string; name: string; detected: boolean; snr: number; relative_ms: number | null;
+  old_delay_ms: number; new_delay_ms: number;
+};
+export type CalibrationReport = { microphone: string; applied: boolean; message: string; outputs: CalibratedOutput[] };
 
 export type OutputMetrics = {
   underruns: number;
@@ -84,6 +97,8 @@ export type EngineSnapshot = {
   outputs: OutputStatus[];
   distance_compensation: boolean;
   spatial: SpatialConfig;
+  app_sources: AppSourceStatus[];
+  calibration: CalibrationProgress | null;
   endpoints: AudioEndpoint[];
   recent_errors: ErrorRecord[];
   updated_at_ms: number;
