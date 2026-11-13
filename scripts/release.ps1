@@ -49,6 +49,12 @@ if ($conf.version -ne $Version) {
         $text = [regex]::Replace($text, '(?m)^version = "\d+\.\d+\.\d+"', "version = `"$Version`"", 1)
         Write-Utf8 $file $text
     }
+    cargo update --workspace --quiet
+    if ($Publish) {
+        git add $confPath package.json apps/desktop/src-tauri/Cargo.toml crates/syncsound-engine/Cargo.toml Cargo.lock
+        git commit -m "chore: release v$Version"
+        if ($LASTEXITCODE -ne 0) { throw 'Committing the version bump failed' }
+    }
 }
 
 if (-not (Test-Path $KeyPath)) { throw "Updater signing key not found at $KeyPath" }
@@ -82,7 +88,10 @@ if (-not $Publish) {
     return
 }
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'Install the GitHub CLI (gh) and run gh auth login.' }
-git tag -a $tag -m "SyncSound $Version" 2>$null
+git push origin HEAD:main
+if ($LASTEXITCODE -ne 0) { throw 'Pushing main failed' }
+git tag -a $tag -m "SyncSound $Version"
+if ($LASTEXITCODE -ne 0) { throw "Tag $tag already exists" }
 git push origin $tag
 if ($LASTEXITCODE -ne 0) { throw 'Pushing the tag failed' }
 gh release create $tag $setup.FullName $sig.FullName $msi.FullName $latest --repo $Repo --title "SyncSound $Version" --notes $Notes

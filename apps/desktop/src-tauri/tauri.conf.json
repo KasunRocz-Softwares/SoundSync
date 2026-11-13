@@ -44,7 +44,9 @@
     },
     "createUpdaterArtifacts": true,
     "copyright": "\u00a9 2026 KR Softwares",
-    "homepage": "https://github.com/KasunRocz-Softwares/SoundSync"
+    "homepage": "https://github.com/KasunRocz-Softwares/SoundSync",
+    "license": "MIT",
+    "licenseFile": "../../../LICENSE"
   },
   "plugins": {
     "updater": {
