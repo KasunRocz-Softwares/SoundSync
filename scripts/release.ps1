@@ -97,6 +97,6 @@ git tag -a $tag -m "SyncSound $Version"
 if ($LASTEXITCODE -ne 0) { throw "Tag $tag already exists" }
 git push origin $tag
 if ($LASTEXITCODE -ne 0) { throw 'Pushing the tag failed' }
-gh release create $tag $setup.FullName $sig.FullName $msi.FullName $latest --repo $Repo --title "SyncSound $Version" --notes $Notes
+gh release create $tag $setup.FullName $sig.FullName $msi.FullName $latest --repo $Repo --title "SyncSound $Version" --notes "$Notes`n`n[Code signing policy](https://github.com/$Repo/blob/main/docs/CODE_SIGNING.md)"
 if ($LASTEXITCODE -ne 0) { throw 'Creating the GitHub release failed' }
 Write-Host "==> Published https://github.com/$Repo/releases/tag/$tag"

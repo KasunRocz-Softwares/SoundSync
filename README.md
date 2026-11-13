@@ -2,7 +2,7 @@
 
 **Status: developer preview.** SyncSound captures Windows audio with WASAPI loopback and plays it on up to eight outputs at once: wired, USB, HDMI and Bluetooth. Each output has its own buffer, drift correction, gain, mute, delay and EQ. A one-click microphone calibration measures when each speaker reaches your seat and sets the delays for you. The latency numbers on the output cards are Windows estimates; use Calibrate for measured alignment.
 
-**[Download the latest release](https://github.com/KasunRocz-Softwares/SoundSync/releases/latest)** (Windows 11 x64)
+**[Download the latest release](https://github.com/KasunRocz-Softwares/SoundSync/releases/latest)** (Windows 11 x64) · [Website](https://kasunrocz-softwares.github.io/SoundSync/) · [Code signing policy](docs/CODE_SIGNING.md)
 
 | Speaker setup: room map, 7.1 and 8D | Per-speaker equalizer |
 |---|---|
@@ -106,8 +106,7 @@ SyncSound checks GitHub Releases for a newer version when it starts. You can tur
 ### Publishing a release (maintainers)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts
-elease.ps1 -Version 0.2.1 -Notes "What changed" -Publish
+powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1 -Version 0.2.1 -Notes "What changed" -Publish
 ```
 
 The script bumps the version, runs the tests, builds the NSIS and MSI installers signed with the updater key (`%USERPROFILE%\.tauri\syncsound-updater.key`, never committed), writes `latest.json`, tags the release and uploads it with `gh`. Back up the key. Without it, existing installs cannot accept future updates.
@@ -120,9 +119,16 @@ The script bumps the version, runs the tests, builds the NSIS and MSI installers
 - The capture format is fixed at 48 kHz stereo float. Multichannel content is downmixed by Windows.
 - Hardware checks for hotplug, sleep/resume, Bluetooth profile switches, and long sessions are listed as unverified in `docs/verification/2026-11-13-windows-release.md`.
 
+## What SyncSound changes on your PC
+
+- **Virtual speaker (optional, off by default):** turning it on makes the VB-CABLE device your Windows default playback device. SyncSound restores your previous default when you turn it off or quit. SyncSound does not install VB-CABLE; you install it yourself.
+- **Start with Windows (optional, off by default):** adds a per-user startup entry, removed when you turn it off.
+- **Update check:** downloads `latest.json` from this repository's GitHub Releases at start. Turn it off at the bottom of the sidebar.
+- Settings and profiles live in `%APPDATA%\cloud.syncsound.desktop`. Uninstall from **Settings → Apps → Installed apps → SyncSound**.
+
 ## Code signing
 
-Signed releases go through SignPath. See [docs/CODE_SIGNING.md](docs/CODE_SIGNING.md) for the code signing policy and setup.
+[Code signing policy](docs/CODE_SIGNING.md). Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
 ## License
 

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SyncSound: every speaker, in sync</title>
+  <meta name="description" content="Free, open-source Windows 11 app that plays your PC audio on wired, USB, HDMI and Bluetooth speakers at once, measured and aligned with your microphone.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="icon" type="image/png" href="assets/icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="SyncSound: every speaker, in sync">
+  <meta property="og:description" content="Play Windows audio on every speaker you own, with Bluetooth lag measured and removed. Free and open source.">
+  <meta property="og:image" content="https://kasunrocz-softwares.github.io/SoundSync/assets/og.jpg">
+  <meta property="og:url" content="https://kasunrocz-softwares.github.io/SoundSync/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+  <link rel="stylesheet" href="style.css">
+  <script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="SyncSound home"><span class="mark"><i class="ph-bold ph-waveform"></i></span>SyncSound</a>
+      <nav aria-label="Sections">
+        <a href="#demo">Demo</a>
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="btn btn-sm" href="https://github.com/KasunRocz-Softwares/SoundSync" rel="noopener"><i class="ph ph-github-logo"></i><span>GitHub</span></a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="dot"></span>Free and open source for Windows 11</p>
+          <h1>Every speaker you own. <em>One moment.</em></h1>
+          <p class="lede">SyncSound plays your PC audio on wired, USB, HDMI and Bluetooth outputs at the same time. Your microphone measures how late each one is, and SyncSound lines them up so the room sounds like one system.</p>
+          <div class="cta-row">
+            <a class="btn btn-primary" id="download" href="https://github.com/KasunRocz-Softwares/SoundSync/releases/latest" rel="noopener">
+              <i class="ph-bold ph-download-simple"></i><span>Download for Windows</span>
+            </a>
+            <a class="btn btn-ghost" href="#demo"><i class="ph ph-play"></i><span>See the demo</span></a>
+          </div>
+          <p class="meta" id="release-meta">Windows 11 x64 · MIT licence · Updates itself</p>
+        </div>
+        <figure class="hero-shot">
+          <img src="assets/02-speaker-setup.webp" width="1400" height="911" alt="SyncSound speaker setup: a room map with a speaker behind the monitor and headphones behind the listener, with 7.1 and 8D modes">
+        </figure>
+      </div>
+    </section>
+
+    <section class="problem reveal">
+      <div class="wrap problem-grid">
+        <p class="stat"><span class="num">255</span><span class="unit">ms</span></p>
+        <div>
+          <h2>Bluetooth is late. Windows doesn't fix it.</h2>
+          <p>On our test desk a pair of Bluetooth headphones reached the ear 255 ms after the wired speaker. That's a clear echo on every word. Windows can only play one device at a time anyway, so a second speaker means a second app, and nothing keeps them together.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="demo reveal" id="demo">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Hear the gap, then close it</h2>
+          <p>A simulation of what reaches your seat. Each bar is a beat. Press Calibrate to see what SyncSound does: it delays the faster speaker until both arrive together.</p>
+        </div>
+        <div class="demo-card">
+          <div class="demo-tracks" aria-hidden="true">
+            <div class="track"><span class="label"><i class="ph ph-speaker-hifi"></i>Wired speaker</span><svg class="lane" id="lane-a" viewBox="0 0 600 48" preserveAspectRatio="none"></svg></div>
+            <div class="track"><span class="label"><i class="ph ph-headphones"></i>Bluetooth headphones</span><svg class="lane" id="lane-b" viewBox="0 0 600 48" preserveAspectRatio="none"></svg></div>
+            <div class="playhead" id="playhead"></div>
+          </div>
+          <div class="demo-foot">
+            <div class="readout" role="status" aria-live="polite">
+              <span>Offset at your seat</span>
+              <strong id="offset">255 ms</strong>
+            </div>
+            <div class="demo-actions">
+              <button class="btn btn-primary" id="calibrate" type="button"><i class="ph-bold ph-microphone"></i><span>Calibrate</span></button>
+              <button class="btn btn-ghost" id="sound" type="button" aria-pressed="false"><i class="ph ph-speaker-slash"></i><span>Sound off</span></button>
+              <button class="btn btn-ghost" id="reset" type="button" disabled><i class="ph ph-arrow-counter-clockwise"></i><span>Reset</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <h2>Built for the speakers you already have</h2>
+          <p>No extra hardware, no account, no cloud. Everything runs on your PC.</p>
+        </div>
+        <div class="bento">
+          <article class="cell cell-wide reveal">
+            <div class="cell-copy">
+              <i class="ph ph-arrows-split"></i>
+              <h3>Up to eight outputs at once</h3>
+              <p>Each output gets its own buffer, drift correction, volume, mute and delay. Gaming, Balanced and Synchronized modes trade latency for stability.</p>
+            </div>
+            <img src="assets/01-routing.webp" width="1400" height="911" loading="lazy" alt="Routing tab listing outputs with volume, delay and latency for each">
+          </article>
+          <article class="cell reveal">
+            <div class="cell-copy">
+              <i class="ph ph-microphone"></i>
+              <h3>One-click calibration</h3>
+              <p>A click track plays through each speaker in turn. Your mic hears when each one arrives and SyncSound sets the delays.</p>
+            </div>
+          </article>
+          <article class="cell cell-tall reveal">
+            <div class="cell-copy">
+              <i class="ph ph-compass"></i>
+              <h3>Room map, 7.1 and 8D</h3>
+              <p>Drag speakers to where they really are. Stereo is panned to match, 7.1 is upmixed, and 8D moves the sound around you.</p>
+            </div>
+            <img src="assets/02-speaker-setup.webp" width="1400" height="911" loading="lazy" alt="Room map with draggable speaker positions">
+          </article>
+          <article class="cell reveal">
+            <div class="cell-copy">
+              <i class="ph ph-app-window"></i>
+              <h3>Route only some apps</h3>
+              <p>Send just Spotify or a game to the extra speakers while calls stay on your headset.</p>
+            </div>
+            <img src="assets/03-apps.webp" width="1400" height="911" loading="lazy" alt="Apps tab with a checklist of apps currently playing audio">
+          </article>
+          <article class="cell cell-wide reveal">
+            <div class="cell-copy">
+              <i class="ph ph-sliders-horizontal"></i>
+              <h3>EQ and room correction per speaker</h3>
+              <p>Bass, mid, treble and low cut for each output. Measure room plays a sweep and stores a gentle 10-band correction that mostly cuts booms.</p>
+            </div>
+            <img src="assets/04-equalizer.webp" width="1400" height="911" loading="lazy" alt="Equalizer tab with sliders and a frequency response curve">
+          </article>
+          <article class="cell reveal">
+            <div class="cell-copy">
+              <i class="ph ph-arrows-clockwise"></i>
+              <h3>Lives in the tray</h3>
+              <p>Starts with Windows if you want, restores your last setup, and installs signed updates from GitHub by itself.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="how" id="how">
+      <div class="wrap">
+        <div class="section-head reveal"><h2>Set up in three steps</h2></div>
+        <ol class="steps">
+          <li class="reveal"><span class="step-n">01</span><h3>Install</h3><p>Download the installer and run it. SmartScreen may ask you to confirm while the code-signing certificate is pending.</p></li>
+          <li class="reveal"><span class="step-n">02</span><h3>Turn on speakers</h3><p>Switch on the outputs you want on the Routing tab and press Start routing. Optional: add the free VB-CABLE so your default speaker can be delayed too.</p></li>
+          <li class="reveal"><span class="step-n">03</span><h3>Calibrate</h3><p>Sit where you listen, pick your mic and press Calibrate delays. About ten seconds later every speaker lands together.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="faq" id="faq">
+      <div class="wrap faq-grid">
+        <div class="section-head reveal">
+          <h2>Questions</h2>
+          <p>Something else? <a href="https://github.com/KasunRocz-Softwares/SoundSync/issues" rel="noopener">Open an issue</a>.</p>
+        </div>
+        <div class="faq-list reveal">
+          <details>
+            <summary>Why does Windows warn me when I run the installer?</summary>
+            <p>The installer isn't Authenticode-signed yet, so SmartScreen doesn't know it. Choose More info, then Run anyway. Signing through SignPath Foundation is being set up; see the <a href="https://github.com/KasunRocz-Softwares/SoundSync/blob/main/docs/CODE_SIGNING.md" rel="noopener">code signing policy</a>. Updates are already signed with SyncSound's own key, and the app refuses any update that doesn't match it.</p>
+          </details>
+          <details>
+            <summary>Do I need VB-CABLE?</summary>
+            <p>No. Without it, Windows plays your default device directly and SyncSound adds the others, delayed to match. With the free VB-CABLE as the default, SyncSound can delay every speaker, including the one Windows used to play. SyncSound restores your previous default when you turn it off or quit.</p>
+          </details>
+          <details>
+            <summary>Does it work with any Bluetooth headphones?</summary>
+            <p>Any headphones or speakers Windows shows as a playback device. Bluetooth delay varies by model and codec, which is why SyncSound measures it with your microphone instead of guessing.</p>
+          </details>
+          <details>
+            <summary>Is it free?</summary>
+            <p>Yes. SyncSound is open source under the MIT licence. There's no account, no subscription and no ads.</p>
+          </details>
+          <details>
+            <summary>What does it send over the internet?</summary>
+            <p>Only the update check, which downloads a small file from GitHub Releases. You can turn it off in the app. Audio, settings and microphone recordings never leave your PC.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing reveal">
+      <div class="wrap closing-inner">
+        <h2>Make the room sound like one system.</h2>
+        <a class="btn btn-primary" id="download-2" href="https://github.com/KasunRocz-Softwares/SoundSync/releases/latest" rel="noopener"><i class="ph-bold ph-download-simple"></i><span>Download for Windows</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <p>SyncSound by KR Softwares · MIT licence</p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/KasunRocz-Softwares/SoundSync" rel="noopener">Source</a>
+        <a href="https://github.com/KasunRocz-Softwares/SoundSync/releases" rel="noopener">Releases</a>
+        <a href="https://github.com/KasunRocz-Softwares/SoundSync/blob/main/docs/CODE_SIGNING.md" rel="noopener">Code signing policy</a>
+        <a href="https://github.com/KasunRocz-Softwares/SoundSync/blob/main/LICENSE" rel="noopener">Licence</a>
+      </nav>
+    </div>
+  </footer>
+  <script src="main.js" defer></script>
+</body>
+</html>

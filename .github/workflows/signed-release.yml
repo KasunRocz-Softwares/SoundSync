@@ -119,4 +119,5 @@ jobs:
         run: |
           $tag = "v$env:VERSION"
           $files = @(Get-ChildItem signed -Recurse -Include *.exe, *.exe.sig, *.msi | ForEach-Object FullName) + "latest.json"
-          gh release create $tag @files --title "SyncSound $env:VERSION" --generate-notes
+          $policy = "Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). [Code signing policy](https://github.com/${{ github.repository }}/blob/main/docs/CODE_SIGNING.md)"
+          gh release create $tag @files --title "SyncSound $env:VERSION" --notes $policy --generate-notes

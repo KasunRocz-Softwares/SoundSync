@@ -9,7 +9,13 @@ Free code signing provided by [SignPath.io](https://about.signpath.io), certific
 
 Every signed release is built from this repository by GitHub Actions (`.github/workflows/signed-release.yml`) and approved by a maintainer before signing.
 
-**Privacy:** SyncSound does not send any information to other networked systems unless the user asks it to. The one exception is the update check, which downloads `latest.json` from this repository's GitHub Releases and can be turned off in the app.
+All team members with commit or approval rights use multi-factor authentication on GitHub and SignPath.
+
+Only the SyncSound installers are signed. The SignPath artifact configuration (`.signpath/artifact-configuration.xml`) accepts only files named and described as SyncSound, and every release is built from source in CI; no third-party binaries are signed.
+
+**Privacy:** SyncSound does not send any information to other networked systems unless the user asks it to. The one exception is the update check, which downloads `latest.json` from this repository's GitHub Releases and can be turned off in the app. No personal data, telemetry or audio leaves the PC.
+
+**System changes:** SyncSound changes the Windows default playback device only when the user turns on the optional virtual speaker, and puts the previous default back when it is turned off or the app quits. "Start with Windows" (off by default) adds a per-user startup entry. SyncSound installs no drivers. It can be removed from Settings → Apps → Installed apps, which also removes the startup entry.
 
 ## Setting it up (maintainers)
 
