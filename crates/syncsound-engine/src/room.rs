@@ -163,7 +163,9 @@ pub fn analyze(window: &[f32], noise: &[f32], rate: u32, target: RoomTarget) -> 
     RoomResult {
         response_db: response.to_vec(),
         correction_db: correction(&response, target),
-        snr_db: (10.0 * (total / total_noise.max(1e-20)).log10()) as f32,
+        // Floors on both sides: a silent recording (e.g. a virtual cable picked
+        // as the microphone) gives 0 dB, never -inf, which JSON can't carry.
+        snr_db: (10.0 * (total.max(1e-20) / total_noise.max(1e-20)).log10()) as f32,
     }
 }
 
@@ -345,6 +347,19 @@ mod tests {
             "{:?}",
             loud.correction_db
         );
+    }
+
+    #[test]
+    fn digital_silence_gives_a_finite_snr_that_survives_json() {
+        // A virtual cable picked as the "microphone" records exact zeros.
+        let silence = vec![0.0f32; (SEGMENT_S * f64::from(RATE)) as usize];
+        let quiet_noise = vec![0.0f32; 48_000];
+        let r = analyze(&silence, &quiet_noise, RATE, RoomTarget::Warm);
+        assert!(r.snr_db.is_finite(), "snr {}", r.snr_db);
+        assert!(r.snr_db < 20.0, "silence is never usable");
+        assert_eq!(r.correction_db, [0.0; 10]);
+        let json = serde_json::to_value(&r).unwrap();
+        assert!(json["snr_db"].is_number(), "{json}");
     }
 
     #[test]

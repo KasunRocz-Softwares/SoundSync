@@ -48,7 +48,7 @@ export function CalibrationCard({ snapshot, onDone }: { snapshot: EngineSnapshot
     <div className="row">
       <Mic size={16} />
       <select value={mic} onChange={e => setMic(e.target.value)} aria-label="Microphone" disabled={busy}>
-        {mics.map(m => <option key={m.id} value={m.id}>{m.name}{m.is_default ? ' (default)' : ''}</option>)}
+        {mics.map(m => <option key={m.id} value={m.id}>{m.name}{m.is_default ? ' (default)' : ''}{/vb-audio|cable output/i.test(m.name) ? ', virtual cable: not a microphone' : ''}</option>)}
         {!mics.length && <option value="">No microphone found</option>}
       </select>
       <button className="start" disabled={!ready} onClick={run}>{busy && !progress?.measuring_room ? 'Calibrating…' : 'Calibrate delays'}</button>
@@ -78,7 +78,7 @@ export function CalibrationCard({ snapshot, onDone }: { snapshot: EngineSnapshot
       <table className="room-table">
         <thead><tr><th>Output</th>{ROOM_BANDS.map(b => <th key={b}>{bandLabel(b)}</th>)}</tr></thead>
         <tbody>{room.outputs.map(o => <React.Fragment key={o.endpoint_id}>
-          <tr><td>{o.name}<small>{o.result ? `measured · SNR ${o.result.snr_db.toFixed(0)} dB` : 'not heard'}</small></td>
+          <tr><td>{o.name}<small>{o.result && Number.isFinite(o.result.snr_db) ? `measured · SNR ${o.result.snr_db.toFixed(0)} dB` : 'not heard'}</small></td>
             {ROOM_BANDS.map((b, i) => { const r = o.result?.response_db[i]; return <td key={b} className="resp">{r == null ? '—' : (Math.round(r) === 0 ? '0' : `${r > 0 ? '+' : ''}${Math.round(r)}`)}</td>; })}</tr>
           <tr className="corr"><td>{o.applied ? 'correction applied' : 'not applied'}</td>
             {ROOM_BANDS.map((b, i) => { const c = o.result?.correction_db[i] ?? 0; return <td key={b} className={c < 0 ? 'cut' : c > 0 ? 'boost' : ''}>{c ? `${c > 0 ? '+' : ''}${c.toFixed(1)}` : '·'}</td>; })}</tr>

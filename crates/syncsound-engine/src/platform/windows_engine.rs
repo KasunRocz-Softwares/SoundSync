@@ -7,8 +7,8 @@ use super::windows_apps::list_audio_apps;
 use super::windows_mic::{list_microphones, MicRecorder, Microphone};
 use super::windows_render::{RenderWorker, WorkerPoll};
 use crate::calibration::{
-    analyze_output, click_sample, soloed_output, solve_delays, solve_levels, total_frames,
-    CalibratedOutput,
+    analyze_output, click_sample, recorded_silence, silent_mic_message, soloed_output,
+    solve_delays, solve_levels, total_frames, CalibratedOutput,
 };
 use crate::capture::AudioApp;
 use crate::capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState, EndpointState};
@@ -1347,7 +1347,9 @@ impl Core {
                 result,
             });
         }
-        let message = if applied == order.len() {
+        let message = if recorded_silence(&recording) {
+            silent_mic_message(&mic_name)
+        } else if applied == order.len() {
             format!("Measured {applied} output(s) with {mic_name} and applied room correction.")
         } else {
             format!(
@@ -1425,7 +1427,9 @@ impl Core {
                 new_trim_db: new_trims.as_ref().map_or(old_trims[k], |t| t[k]),
             })
             .collect();
-        let message = if applied && new_trims.is_some() {
+        let message = if recorded_silence(&recording) {
+            silent_mic_message(&mic_name)
+        } else if applied && new_trims.is_some() {
             format!("Aligned and level-matched {detected} outputs using {mic_name}.")
         } else if applied {
             format!("Aligned {detected} outputs using {mic_name}.")

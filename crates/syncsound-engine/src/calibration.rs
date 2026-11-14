@@ -123,6 +123,29 @@ pub fn analyze_output(
 
 const LEVEL_WINDOW_MS: usize = 30;
 
+/// True when a microphone recording is digital silence (below −80 dBFS
+/// throughout). A real microphone always hears some room noise; a virtual
+/// cable picked as the microphone records exact zeros.
+pub fn recorded_silence(recording: &[f32]) -> bool {
+    recording.iter().all(|x| !x.is_finite() || x.abs() < 1e-4)
+}
+
+pub fn silent_mic_message(mic_name: &str) -> String {
+    let cable = {
+        let n = mic_name.to_ascii_lowercase();
+        n.contains("vb-audio") || n.contains("cable output") || n.contains("virtual")
+    };
+    if cable {
+        format!(
+            "{mic_name} is a virtual audio cable, not a microphone, so it recorded silence and nothing was changed. Choose your real microphone and try again."
+        )
+    } else {
+        format!(
+            "{mic_name} recorded only silence, so nothing was changed. Check that it's plugged in, unmuted and allowed in Windows privacy settings, or choose another microphone."
+        )
+    }
+}
+
 /// New level trims that make every clearly heard output equally loud at the
 /// seat. The loudest stays as is; louder outputs are turned down (never up, so
 /// nothing clips), within `min_trim_db`. Undetected outputs keep their trim.
@@ -336,6 +359,16 @@ mod tests {
             .map(|k| analyze_output(&rec, RATE, start, k))
             .collect();
         assert_eq!(solve_levels(&arrivals, &[0.0, -2.0], -24.0), None);
+    }
+
+    #[test]
+    fn recognises_a_silent_recording_and_names_virtual_cables() {
+        assert!(recorded_silence(&[0.0; 4800]));
+        assert!(recorded_silence(&[]));
+        let (rec, _) = simulate(&[100.0, 300.0], &[0.5, 0.5], 0);
+        assert!(!recorded_silence(&rec), "room noise and clicks are not silence");
+        assert!(silent_mic_message("CABLE Output (VB-Audio Virtual Cable)").contains("virtual audio cable"));
+        assert!(!silent_mic_message("Microphone (HS80)").contains("virtual"));
     }
 
     #[test]
