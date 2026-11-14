@@ -45,7 +45,14 @@ export type OutputConfig = {
 export type EqSettings = {
   enabled: boolean; low_cut_hz: number; bass_db: number; mid_db: number; treble_db: number;
   room_correction: boolean; correction_db: number[];
+  bass_role: BassRole; virtual_bass: number;
 };
+export type BassRole = 'full' | 'satellite' | 'subwoofer';
+export type SoundSettings = {
+  crossover_hz: number; tilt_db: number; loudness: number;
+  normalize: boolean; night_mode: boolean; match_levels: boolean;
+};
+export const CROSSOVER_OPTIONS = [60, 80, 100, 120, 150];
 export const ROOM_BANDS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 export type RoomResult = { response_db: (number | null)[]; correction_db: number[]; snr_db: number };
 export type RoomOutput = { endpoint_id: string; name: string; applied: boolean; result: RoomResult | null };
@@ -60,7 +67,7 @@ export type Microphone = { id: string; name: string; is_default: boolean };
 export type CalibrationProgress = { elapsed_s: number; total_s: number; playing: string | null; measuring_room: boolean };
 export type CalibratedOutput = {
   endpoint_id: string; name: string; detected: boolean; snr: number; relative_ms: number | null;
-  old_delay_ms: number; new_delay_ms: number;
+  old_delay_ms: number; new_delay_ms: number; old_trim_db: number; new_trim_db: number;
 };
 export type CalibrationReport = { microphone: string; applied: boolean; message: string; outputs: CalibratedOutput[] };
 
@@ -108,6 +115,7 @@ export type EngineSnapshot = {
   outputs: OutputStatus[];
   distance_compensation: boolean;
   spatial: SpatialConfig;
+  sound: SoundSettings;
   app_sources: AppSourceStatus[];
   calibration: CalibrationProgress | null;
   endpoints: AudioEndpoint[];

@@ -55,6 +55,9 @@ pub struct Arrival {
     pub phase_ms: f64,
     /// Peak-to-median ratio of the folded envelope.
     pub snr: f32,
+    /// Click energy at the microphone, dB (relative between outputs only).
+    #[serde(default)]
+    pub level_db: f32,
 }
 
 /// Finds one output's arrival in the mic recording. `track_start` is the mic
@@ -76,10 +79,12 @@ pub fn analyze_output(
     }
     let start = start as usize;
     let mut fold = vec![0.0f32; period];
+    let mut power = vec![0.0f32; period];
     for p in 0..periods {
         let base = start + p * period;
         for i in 0..period {
             fold[i] += (recording[base + i] - recording[base + i - 1]).abs();
+            power[i] += recording[base + i] * recording[base + i];
         }
     }
     // 1 ms moving average, circular.
@@ -100,10 +105,58 @@ pub fn analyze_output(
         );
     // The envelope peaks at the end of its 1 ms window; report the window centre.
     let index = (peak_index + period - win / 2) % period;
+    // Click energy: 1 ms before to 30 ms after the arrival, minus the noise floor.
+    let before = win;
+    let span = (rate as usize * LEVEL_WINDOW_MS / 1000).max(1);
+    let mut sorted_power = power.clone();
+    sorted_power.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let floor = sorted_power[period / 2];
+    let energy: f32 = (0..span)
+        .map(|k| power[(index + period - before + k) % period] - floor)
+        .sum();
     Some(Arrival {
         phase_ms: index as f64 * 1000.0 / f64::from(rate),
         snr: peak / median,
+        level_db: 10.0 * (energy.max(1e-12) / periods as f32).log10(),
     })
+}
+
+const LEVEL_WINDOW_MS: usize = 30;
+
+/// New level trims that make every clearly heard output equally loud at the
+/// seat. The loudest stays as is; louder outputs are turned down (never up, so
+/// nothing clips), within `min_trim_db`. Undetected outputs keep their trim.
+/// None when fewer than two outputs were heard.
+pub fn solve_levels(
+    arrivals: &[Option<Arrival>],
+    current_trims: &[f32],
+    min_trim_db: f32,
+) -> Option<Vec<f32>> {
+    let heard: Vec<Option<f32>> = arrivals
+        .iter()
+        .map(|a| a.filter(|a| a.snr >= MIN_SNR).map(|a| a.level_db))
+        .collect();
+    if heard.iter().flatten().count() < 2 {
+        return None;
+    }
+    let quietest = heard.iter().flatten().cloned().fold(f32::MAX, f32::min);
+    let raw: Vec<Option<f32>> = heard
+        .iter()
+        .zip(current_trims)
+        .map(|(l, t)| l.map(|l| t + (quietest - l)))
+        .collect();
+    let top = raw.iter().flatten().cloned().fold(f32::MIN, f32::max);
+    Some(
+        raw.iter()
+            .zip(current_trims)
+            .map(|(r, t)| match r {
+                // Shift so the highest trim is 0 dB: no level is lost needlessly.
+                Some(v) => ((v - top.min(0.0)) * 2.0).round() / 2.0,
+                None => *t,
+            })
+            .map(|v| v.clamp(min_trim_db, 0.0))
+            .collect(),
+    )
 }
 
 pub fn wrap_ms(ms: f64) -> f64 {
@@ -125,6 +178,11 @@ pub struct CalibratedOutput {
     pub relative_ms: Option<f64>,
     pub old_delay_ms: u32,
     pub new_delay_ms: u32,
+    /// Level trim before and after level matching (equal when not matched).
+    #[serde(default)]
+    pub old_trim_db: f32,
+    #[serde(default)]
+    pub new_trim_db: f32,
 }
 
 /// New delays that make every detected output arrive with the latest one, then
@@ -256,6 +314,28 @@ mod tests {
         assert_eq!(relative[1], None);
         assert_eq!(delays, vec![0, 40]);
         assert!(analyze_output(&rec[..1000], RATE, start, 1).is_none());
+    }
+
+    #[test]
+    fn matches_levels_by_turning_the_louder_output_down() {
+        // Output 0 reaches the seat twice as loud (+6 dB) as output 1.
+        let (rec, start) = simulate(&[120.0, 470.0], &[0.5, 0.25], 0);
+        let arrivals: Vec<Option<Arrival>> = (0..2)
+            .map(|k| analyze_output(&rec, RATE, start, k))
+            .collect();
+        let diff = arrivals[0].unwrap().level_db - arrivals[1].unwrap().level_db;
+        assert!((diff - 6.02).abs() < 0.5, "measured {diff} dB");
+        let trims = solve_levels(&arrivals, &[0.0, 0.0], -24.0).unwrap();
+        assert!((trims[0] + 6.0).abs() <= 0.5 && trims[1] == 0.0, "{trims:?}");
+        // Existing trims are kept in the solution and the top is raised to 0 dB.
+        let trims = solve_levels(&arrivals, &[-3.0, -3.0], -24.0).unwrap();
+        assert!((trims[0] + 6.0).abs() <= 0.5 && trims[1] == 0.0, "{trims:?}");
+        // One silent output: nothing to match.
+        let (rec, start) = simulate(&[100.0, 300.0], &[0.5, 0.0], 0);
+        let arrivals: Vec<Option<Arrival>> = (0..2)
+            .map(|k| analyze_output(&rec, RATE, start, k))
+            .collect();
+        assert_eq!(solve_levels(&arrivals, &[0.0, -2.0], -24.0), None);
     }
 
     #[test]

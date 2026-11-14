@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, AlertTriangle, AppWindow, Settings, SlidersHorizontal, Speaker, Download, FolderOpen, Headphones, Play, Power, RefreshCw, Save, Volume2, VolumeX,
+  Activity, AlertTriangle, AppWindow, AudioLines, Settings, SlidersHorizontal, Speaker, Download, FolderOpen, Headphones, Play, Power, RefreshCw, Save, Volume2, VolumeX,
 } from 'lucide-react';
 import { api, errorMessage, type SourceKind } from './api';
 import {
@@ -12,6 +12,7 @@ import {
 import { RoomMap } from './RoomMap';
 import { AppsPanel } from './AppsPanel';
 import { EqPanel } from './EqPanel';
+import { SoundPanel } from './SoundPanel';
 import { CalibrationCard } from './CalibrationCard';
 import { Updater } from './Updater';
 import { SettingsPanel } from './SettingsPanel';
@@ -55,11 +56,12 @@ function sourceValue(source: CaptureSource): string {
   return 'apps';
 }
 
-type Tab = 'routing' | 'speakers' | 'apps' | 'eq' | 'settings';
+type Tab = 'routing' | 'speakers' | 'apps' | 'sound' | 'eq' | 'settings';
 const TABS: { id: Tab; label: string; title: string; subtitle: string; icon: React.ReactNode }[] = [
   { id: 'routing', label: 'Routing', title: 'Audio routing', subtitle: 'Capture Windows audio once and play it on several outputs at the same time.', icon: <Activity size={17} /> },
   { id: 'speakers', label: 'Speaker setup', title: 'Speaker setup', subtitle: 'Place your speakers, choose a sound system, and calibrate with a microphone.', icon: <Speaker size={17} /> },
   { id: 'apps', label: 'Apps', title: 'App routing', subtitle: 'Send only the apps you choose to your outputs.', icon: <AppWindow size={17} /> },
+  { id: 'sound', label: 'Sound', title: 'Sound enhancement', subtitle: 'Fuller bass on small speakers, warmer or brighter tone, and even volume.', icon: <AudioLines size={17} /> },
   { id: 'eq', label: 'Equalizer', title: 'Equalizer', subtitle: 'Bass, mid, treble, low cut and room correction for each speaker.', icon: <SlidersHorizontal size={17} /> },
   { id: 'settings', label: 'Settings', title: 'Settings', subtitle: 'Start with Windows, restore your setup, and the tray.', icon: <Settings size={17} /> },
 ];
@@ -430,6 +432,7 @@ function App() {
 
       </>}
       {tab === 'apps' && <AppsPanel snapshot={snapshot} act={act} />}
+      {tab === 'sound' && <SoundPanel snapshot={snapshot} act={act} />}
       {tab === 'eq' && <EqPanel snapshot={snapshot} act={act} />}
       {tab === 'settings' && <SettingsPanel />}
 

@@ -10,6 +10,7 @@ pub mod capture;
 pub mod commands;
 pub mod diagnostics;
 pub mod dsp;
+pub mod enhance;
 pub mod eq;
 pub mod metrics;
 pub mod mixer;
