@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ab-recall"
+description = "Enables the ab_recall command without any pre-configured scope."
+commands.allow = ["ab_recall"]
+
+[[permission]]
+identifier = "deny-ab-recall"
+description = "Denies the ab_recall command without any pre-configured scope."
+commands.deny = ["ab_recall"]

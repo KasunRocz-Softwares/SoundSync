@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ab-store"
+description = "Enables the ab_store command without any pre-configured scope."
+commands.allow = ["ab_store"]
+
+[[permission]]
+identifier = "deny-ab-store"
+description = "Denies the ab_store command without any pre-configured scope."
+commands.deny = ["ab_store"]

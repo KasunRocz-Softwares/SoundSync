@@ -811,12 +811,34 @@ impl Core {
         {
             return Err(EngineError::UnknownEndpoint(bad.endpoint_id.clone()));
         }
+        let rate = self.format.sample_rate;
+        // Same speakers on as now (undo, A/B, re-loading a profile): update the
+        // settings in place so nothing restarts and the audio never drops out.
+        let mut now_on = self.enabled_ids();
+        now_on.sort();
+        let mut next_on: Vec<String> = configs
+            .iter()
+            .filter(|c| c.enabled)
+            .map(|c| c.endpoint_id.clone())
+            .collect();
+        next_on.sort();
+        if now_on == next_on && configs.iter().all(|c| self.outputs.contains_key(&c.endpoint_id)) {
+            for config in configs {
+                let slot = self.outputs.get_mut(&config.endpoint_id).unwrap();
+                slot.controls.set_gain(config.gain);
+                slot.controls.set_muted(config.muted);
+                slot.controls
+                    .set_delay_frames(ms_to_frames(config.delay_ms, rate));
+                slot.config = config;
+            }
+            self.sync_capture_routes();
+            return Ok(());
+        }
         let ids: Vec<String> = self.outputs.keys().cloned().collect();
         for id in ids {
             self.stop_output(&id);
         }
         self.outputs.clear();
-        let rate = self.format.sample_rate;
         for config in configs {
             let slot = self.slot(&config.endpoint_id)?;
             slot.controls.set_gain(config.gain);

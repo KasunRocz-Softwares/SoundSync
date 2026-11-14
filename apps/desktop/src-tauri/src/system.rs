@@ -29,6 +29,8 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     /// Present while the virtual speaker mode is on.
     pub virtual_speaker: Option<VirtualSpeaker>,
+    /// System-wide Ctrl+Alt shortcuts (routing, A/B, listening mode, undo).
+    pub hotkeys: bool,
 }
 
 impl Default for AppSettings {
@@ -38,6 +40,7 @@ impl Default for AppSettings {
             auto_start_routing: false,
             close_to_tray: true,
             virtual_speaker: None,
+            hotkeys: true,
         }
     }
 }

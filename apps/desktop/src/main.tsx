@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, AlertTriangle, AppWindow, AudioLines, Settings, SlidersHorizontal, Speaker, Download, FolderOpen, Headphones, Play, Power, RefreshCw, Save, Volume2, VolumeX,
+  Activity, AlertTriangle, AppWindow, AudioLines, Settings, SlidersHorizontal, Speaker, Download, FolderOpen, Headphones, Play, Power, Redo2, RefreshCw, Save, Undo2, Volume2, VolumeX,
 } from 'lucide-react';
 import { api, errorMessage, type SourceKind } from './api';
 import {
   MAX_DELAY_MS, MAX_DISTANCE_M, MAX_ENABLED_OUTPUTS, MIN_DISTANCE_M, MIN_TRIM_DB,
   type AudioEndpoint, type AudioMode, type CaptureSource, type CaptureState, type ChannelRole, type EngineSnapshot,
   type LifecycleState, type OutputStatus, type ProfileLoadReport, type SoundPreset, type SpeakerPosition,
+  type WorkflowStatus,
 } from './types';
 import { RoomMap } from './RoomMap';
 import { AppsPanel } from './AppsPanel';
@@ -238,13 +239,31 @@ function App() {
   const setTab = (t: Tab) => { setTabState(t); try { localStorage.setItem('syncsound.tab', t); } catch { /* ignore */ } };
   const current = TABS.find(t => t.id === tab)!;
 
+  const [workflow, setWorkflow] = useState<WorkflowStatus | null>(null);
   const poll = useCallback(async () => {
-    try { setSnapshot(await api.status()); } catch (e) { setError(errorMessage(e)); }
+    try { setSnapshot(await api.status()); setWorkflow(await api.workflow()); } catch (e) { setError(errorMessage(e)); }
   }, []);
+  /** Every change goes through here: remember the setup first, so it can be undone. */
   const act = useCallback((fn: () => Promise<unknown>) => {
     setError('');
-    fn().then(poll, e => { setError(errorMessage(e)); void poll(); });
+    api.checkpoint().catch(() => undefined).then(fn).then(poll, e => { setError(errorMessage(e)); void poll(); });
   }, [poll]);
+  /** Undo / redo / A-B: no checkpoint of their own (they manage history). */
+  const step = useCallback((fn: () => Promise<WorkflowStatus>) => {
+    setError('');
+    fn().then(s => { setWorkflow(s); void poll(); }, e => { setError(errorMessage(e)); void poll(); });
+  }, [poll]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof HTMLElement && (e.target.tagName === 'INPUT' && (e.target as HTMLInputElement).type === 'text');
+      if (typing || !e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); step(api.undo); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); step(api.redo); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [step]);
   const refreshProfiles = useCallback(() => { api.listProfiles().then(setProfiles, e => setError(errorMessage(e))); }, []);
 
   useEffect(() => {
@@ -297,6 +316,20 @@ function App() {
       <header>
         <div><h1>{current.title}</h1><p>{current.subtitle}</p></div>
         <div className="header-actions">
+          <div className="history" role="group" aria-label="Undo and A/B compare">
+            <button className="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!workflow?.can_undo} onClick={() => step(api.undo)}><Undo2 size={16} /></button>
+            <button className="icon-btn" title="Redo (Ctrl+Y)" aria-label="Redo" disabled={!workflow?.can_redo} onClick={() => step(api.redo)}><Redo2 size={16} /></button>
+            {([0, 1] as const).map(slot => {
+              const label = slot === 0 ? 'A' : 'B';
+              const stored = workflow?.ab_stored[slot] ?? false;
+              return <span key={slot} className={`ab ${workflow?.ab_active === slot ? 'active' : ''}`}>
+                <button className="ab-recall" disabled={!stored} title={stored ? `Switch to ${label} (Ctrl+Alt+${label})` : `Save ${label} first`}
+                  aria-label={`Switch to ${label}`} onClick={() => step(() => api.abRecall(slot))}>{label}</button>
+                <button className="ab-save" title={`Save the current setup as ${label}`} aria-label={`Save as ${label}`}
+                  onClick={() => step(() => api.abStore(slot))}><Save size={12} /></button>
+              </span>;
+            })}
+          </div>
           <button onClick={refresh} disabled={busy}><RefreshCw size={16} /> Refresh devices</button>
           <button className={running ? 'stop' : 'start'} onClick={() => act(running ? api.stop : api.start)}>
             {running ? <><Power size={16} /> Stop routing</> : <><Play size={16} /> Start routing</>}
@@ -434,7 +467,7 @@ function App() {
       {tab === 'apps' && <AppsPanel snapshot={snapshot} act={act} />}
       {tab === 'sound' && <SoundPanel snapshot={snapshot} act={act} />}
       {tab === 'eq' && <EqPanel snapshot={snapshot} act={act} />}
-      {tab === 'settings' && <SettingsPanel />}
+      {tab === 'settings' && <SettingsPanel onChange={() => void poll()} />}
 
       <footer>
         <span>Capture format {snapshot ? `${snapshot.capture_format.sample_rate.toLocaleString()} Hz · ${snapshot.capture_format.channels} ch float` : '—'}</span>

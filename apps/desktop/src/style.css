@@ -333,3 +333,19 @@ aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .gband strong { color: var(--text); font-weight: 500; font-size: 11px; min-height: 14px; }
 .target-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 10px; }
 .target-row select { width: auto; }
+
+/* Undo / redo and A/B compare */
+.history { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; padding-right: 10px; border-right: 1px solid var(--line); }
+.history .icon-btn { padding: 8px; }
+.ab { display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-left: 4px; }
+.ab button { border: 0; border-radius: 0; }
+.ab-recall { padding: 7px 11px; font-weight: 700; min-width: 34px; }
+.ab-save { padding: 7px 7px; background: #172131; color: var(--muted); }
+.ab.active { border-color: var(--accent-strong); }
+.ab.active .ab-recall { background: var(--accent-soft); color: #7bf0d8; }
+
+/* Settings: hotkeys and files */
+.settings h2 { display: flex; align-items: center; gap: 8px; }
+.hotkeys { list-style: none; margin: 4px 0 0; padding: 0 0 0 29px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hotkeys li.taken { color: var(--warn); }
+.file-actions { display: flex; gap: 10px; flex-wrap: wrap; }

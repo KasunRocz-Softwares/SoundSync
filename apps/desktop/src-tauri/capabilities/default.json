@@ -49,6 +49,15 @@
     "allow-virtual-speaker-status",
     "allow-enable-virtual-speaker",
     "allow-disable-virtual-speaker",
+    "allow-hotkey-status",
+    "allow-workflow-status",
+    "allow-checkpoint",
+    "allow-undo",
+    "allow-redo",
+    "allow-ab-store",
+    "allow-ab-recall",
+    "allow-export-settings",
+    "allow-import-settings",
     "autostart:default"
   ]
 }

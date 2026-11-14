@@ -63,7 +63,9 @@ export const ROOM_BANDS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 1600
 export type RoomResult = { response_db: (number | null)[]; correction_db: number[]; snr_db: number };
 export type RoomOutput = { endpoint_id: string; name: string; applied: boolean; result: RoomResult | null };
 export type RoomReport = { microphone: string; message: string; outputs: RoomOutput[] };
-export type AppSettings = { restore_last_session: boolean; auto_start_routing: boolean; close_to_tray: boolean };
+export type AppSettings = { restore_last_session: boolean; auto_start_routing: boolean; close_to_tray: boolean; hotkeys: boolean };
+export type WorkflowStatus = { can_undo: boolean; can_redo: boolean; ab_stored: [boolean, boolean]; ab_active: number | null };
+export type HotkeyStatus = { enabled: boolean; keys: string[]; refused: string[] };
 export type VirtualSpeakerStatus = {
   installed: boolean; cable_name: string | null; active: boolean; default_is_cable: boolean; previous_default_name: string | null;
 };

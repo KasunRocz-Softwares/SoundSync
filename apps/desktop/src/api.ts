@@ -3,6 +3,7 @@ import type {
   AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpatialConfig,
   SpeakerPosition, StereoSpread, EqSettings, AudioApp, Microphone, CalibrationReport,
   RoomReport, AppSettings, VirtualSpeakerStatus, SoundSettings, ListeningMode, AppMode, OutputSpectrum,
+  WorkflowStatus, HotkeyStatus,
 } from './types';
 
 export function errorMessage(error: unknown): string {
@@ -54,7 +55,17 @@ export const api = {
   settings: () => invoke<AppSettings & { virtual_speaker: unknown }>('get_app_settings'),
   saveSettings: (s: AppSettings) => invoke<AppSettings>('set_app_settings', {
     restoreLastSession: s.restore_last_session, autoStartRouting: s.auto_start_routing, closeToTray: s.close_to_tray,
+    hotkeys: s.hotkeys,
   }),
+  hotkeyStatus: () => invoke<HotkeyStatus>('hotkey_status'),
+  workflow: () => invoke<WorkflowStatus>('workflow_status'),
+  checkpoint: () => invoke<WorkflowStatus>('checkpoint'),
+  undo: () => invoke<WorkflowStatus>('undo'),
+  redo: () => invoke<WorkflowStatus>('redo'),
+  abStore: (slot: 0 | 1) => invoke<WorkflowStatus>('ab_store', { slot }),
+  abRecall: (slot: 0 | 1) => invoke<WorkflowStatus>('ab_recall', { slot }),
+  exportSettings: () => invoke<string>('export_settings'),
+  importSettings: (text: string) => invoke<ProfileLoadReport>('import_settings', { text }),
   virtualSpeaker: () => invoke<VirtualSpeakerStatus>('virtual_speaker_status'),
   enableVirtualSpeaker: () => invoke<VirtualSpeakerStatus>('enable_virtual_speaker'),
   disableVirtualSpeaker: () => invoke<VirtualSpeakerStatus>('disable_virtual_speaker'),

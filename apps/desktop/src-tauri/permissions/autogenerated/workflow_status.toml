@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-workflow-status"
+description = "Enables the workflow_status command without any pre-configured scope."
+commands.allow = ["workflow_status"]
+
+[[permission]]
+identifier = "deny-workflow-status"
+description = "Denies the workflow_status command without any pre-configured scope."
+commands.deny = ["workflow_status"]

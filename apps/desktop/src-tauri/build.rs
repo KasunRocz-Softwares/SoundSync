@@ -42,6 +42,15 @@ const COMMANDS: &[&str] = &[
     "virtual_speaker_status",
     "enable_virtual_speaker",
     "disable_virtual_speaker",
+    "hotkey_status",
+    "workflow_status",
+    "checkpoint",
+    "undo",
+    "redo",
+    "ab_store",
+    "ab_recall",
+    "export_settings",
+    "import_settings",
 ];
 
 fn main() {

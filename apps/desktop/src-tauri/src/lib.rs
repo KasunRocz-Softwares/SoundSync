@@ -22,8 +22,10 @@ use syncsound_engine::{diagnostics, AudioEngine, EngineError, EngineSnapshot, Ou
 use tauri::{Manager, State};
 
 mod system;
+mod workflow;
 
 pub(crate) struct AppState {
+    pub(crate) workflow: std::sync::Mutex<workflow::Workflow>,
     pub(crate) engine: AudioEngine,
     pub(crate) profiles: ProfileStore,
     diagnostics_dir: PathBuf,
@@ -40,7 +42,12 @@ pub(crate) fn apply_profile(
 ) -> CmdResult<ProfileLoadReport> {
     let endpoints = engine.refresh_endpoints().map_err(engine_error)?;
     let plan = profile.plan_apply(&endpoints);
-    engine.set_mode(plan.mode).map_err(engine_error)?;
+    let current = engine.snapshot();
+    // Mode and source changes restart audio: only send them when they differ, so
+    // undo and A/B switches are seamless.
+    if current.mode != plan.mode {
+        engine.set_mode(plan.mode).map_err(engine_error)?;
+    }
     engine
         .set_distance_compensation(plan.distance_compensation)
         .map_err(engine_error)?;
@@ -48,7 +55,9 @@ pub(crate) fn apply_profile(
     engine.set_sound(plan.sound).map_err(engine_error)?;
     engine.set_app_modes(plan.app_modes.clone()).map_err(engine_error)?;
     if let Some(source) = plan.source.clone() {
-        engine.set_source(source).map_err(engine_error)?;
+        if source != current.source {
+            engine.set_source(source).map_err(engine_error)?;
+        }
     }
     let applied_outputs = plan.outputs.len();
     engine.apply_outputs(plan.outputs).map_err(engine_error)?;
@@ -291,14 +300,39 @@ async fn set_app_settings(
     restore_last_session: bool,
     auto_start_routing: bool,
     close_to_tray: bool,
+    hotkeys: Option<bool>,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> CmdResult<system::AppSettings> {
     let mut settings = state.settings.lock().unwrap();
     settings.restore_last_session = restore_last_session;
     settings.auto_start_routing = auto_start_routing;
     settings.close_to_tray = close_to_tray;
+    if let Some(on) = hotkeys {
+        settings.hotkeys = on;
+        workflow::set_hotkeys(&app, on);
+    }
     system::save_settings(&state.data_dir, &settings)?;
     Ok(settings.clone())
+}
+
+#[derive(Serialize)]
+struct HotkeyStatus {
+    enabled: bool,
+    keys: Vec<&'static str>,
+    /// Keys another app already uses.
+    refused: Vec<&'static str>,
+}
+
+#[tauri::command]
+async fn hotkey_status(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<HotkeyStatus> {
+    let enabled = state.settings.lock().unwrap().hotkeys;
+    let refused = workflow::set_hotkeys(&app, enabled);
+    Ok(HotkeyStatus {
+        enabled,
+        keys: workflow::hotkey_help(),
+        refused,
+    })
 }
 
 #[tauri::command]
@@ -582,6 +616,7 @@ pub fn run() {
             // Profiles, settings and diagnostics live in per-user app data, never the install dir.
             let data = app.path().app_data_dir()?;
             app.manage(AppState {
+                workflow: std::sync::Mutex::new(workflow::Workflow::default()),
                 engine: AudioEngine::spawn(),
                 profiles: ProfileStore::new(data.join("profiles")),
                 diagnostics_dir: data.join("diagnostics"),
@@ -595,6 +630,9 @@ pub fn run() {
                 }
             }
             system::create_tray(app.handle())?;
+            app.handle().plugin(workflow::hotkey_plugin())?;
+            let hotkeys_on = app.state::<AppState>().settings.lock().unwrap().hotkeys;
+            workflow::set_hotkeys(app.handle(), hotkeys_on);
             // Restore off the UI thread; the engine call can take a moment.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -659,7 +697,16 @@ pub fn run() {
             set_app_settings,
             virtual_speaker_status,
             enable_virtual_speaker,
-            disable_virtual_speaker
+            disable_virtual_speaker,
+            hotkey_status,
+            workflow::workflow_status,
+            workflow::checkpoint,
+            workflow::undo,
+            workflow::redo,
+            workflow::ab_store,
+            workflow::ab_recall,
+            workflow::export_settings,
+            workflow::import_settings
         ])
         .build(tauri::generate_context!())
         .expect("error while building SyncSound");
