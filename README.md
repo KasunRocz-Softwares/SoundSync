@@ -9,6 +9,8 @@
 | ![Speaker setup](docs/screenshots/02-speaker-setup.png) | ![Equalizer](docs/screenshots/04-equalizer.png) |
 | **Routing** | **Route only selected apps** |
 | ![Routing](docs/screenshots/01-routing.png) | ![Apps](docs/screenshots/03-apps.png) |
+| **Sound: listening modes, live spectrum, tone** | |
+| ![Sound](docs/screenshots/05-sound.png) | |
 
 ## What works
 
