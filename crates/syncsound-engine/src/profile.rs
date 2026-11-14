@@ -567,7 +567,7 @@ mod tests {
         loud.outputs[0].gain = 4.0;
         assert!(Profile::from_json(&loud.to_json()).is_err());
         let mut many = profile();
-        many.outputs = (0..9)
+        many.outputs = (0..=MAX_ENABLED_OUTPUTS)
             .map(|i| ProfileOutput {
                 endpoint_id: format!("id-{i}"),
                 name_hint: String::new(),

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Activity, AppWindow, AudioLines, Clapperboard, Gamepad2, Mic, Music, Plus, Speaker, Waves, X } from 'lucide-react';
 import { api, errorMessage } from './api';
 import {
@@ -63,13 +63,42 @@ function BassRow({ output, act }: { output: OutputStatus; act: Act }) {
   </article>;
 }
 
-/** Live octave-band levels of what each speaker plays, after every effect. */
+/** Peak-hold state for one output: per band, plus the sample peak and limiter. */
+type Held = { bands: number[]; bandAt: number[]; peak: number; peakAt: number; limiter: number; limiterAt: number };
+const HOLD_MS = 1500;
+const FALL_DB = 1.5; // per 100 ms tick once the hold expires
+
+function hold(prev: Held | undefined, s: OutputSpectrum, now: number): Held {
+  const h: Held = prev ?? { bands: Array(10).fill(-90), bandAt: Array(10).fill(0), peak: -90, peakAt: 0, limiter: 0, limiterAt: 0 };
+  const bands = h.bands.map((v, i) => {
+    const level = s.levels_db[i] ?? -90;
+    if (level >= v) { h.bandAt[i] = now; return level; }
+    return now - h.bandAt[i] > HOLD_MS ? Math.max(level, v - FALL_DB) : v;
+  });
+  let { peak, peakAt, limiter, limiterAt } = h;
+  if (s.peak_db >= peak || now - peakAt > HOLD_MS * 2) { peak = s.peak_db; peakAt = now; }
+  if (s.limiter_db >= limiter || now - limiterAt > HOLD_MS) { limiter = s.limiter_db; limiterAt = now; }
+  return { bands, bandAt: h.bandAt, peak, peakAt, limiter, limiterAt };
+}
+
+const lufs = (v: number) => (v <= -69.9 ? '–' : v.toFixed(1));
+
+/** Live octave-band levels of what each speaker plays, after every effect,
+ *  with peak hold, loudness (LUFS) and the safety limiter. */
 function SpectrumCard({ outputs, running }: { outputs: OutputStatus[]; running: boolean }) {
   const [spectra, setSpectra] = useState<OutputSpectrum[]>([]);
+  const held = useRef(new Map<string, Held>());
+  const [, redraw] = useState(0);
   useEffect(() => {
-    if (!running) { setSpectra([]); return; }
+    if (!running) { setSpectra([]); held.current.clear(); return; }
     let alive = true;
-    const tick = () => api.spectrum().then(s => { if (alive) setSpectra(s); }, () => {});
+    const tick = () => api.spectrum().then(list => {
+      if (!alive) return;
+      const now = Date.now();
+      for (const s of list) held.current.set(s.endpoint_id, hold(held.current.get(s.endpoint_id), s, now));
+      setSpectra(list);
+      redraw(n => n + 1);
+    }, () => {});
     tick();
     const timer = window.setInterval(tick, 100);
     return () => { alive = false; window.clearInterval(timer); };
@@ -80,19 +109,33 @@ function SpectrumCard({ outputs, running }: { outputs: OutputStatus[]; running: 
     {!running && <p className="hint top">Start routing to see the live levels.</p>}
     {running && <div className="spectra">
       {outputs.map(o => {
-        const levels = spectra.find(s => s.endpoint_id === o.endpoint_id)?.levels_db ?? Array(10).fill(-90);
+        const s = spectra.find(x => x.endpoint_id === o.endpoint_id);
+        const levels = s?.levels_db ?? Array(10).fill(-90);
+        const h = held.current.get(o.endpoint_id);
+        const limiting = (h?.limiter ?? 0) >= 0.1;
         return <figure key={o.endpoint_id} className="spectrum" aria-label={`Live spectrum of ${o.name}`}>
           <div className="bars">
             {levels.map((db, i) => <div key={i} className="bar-slot" title={`${bandLabel(ROOM_BANDS[i])} Hz: ${db.toFixed(0)} dB`}>
               <div className={`bar ${i < 2 ? 'low' : ''}`} style={{ transform: `scaleY(${height(db)})` }} />
+              {h && h.bands[i] > -66 && <div className="peak-hold" style={{ bottom: `${height(h.bands[i]) * 100}%` }} />}
             </div>)}
           </div>
           <div className="bar-labels">{ROOM_BANDS.map(b => <span key={b}>{bandLabel(b)}</span>)}</div>
-          <figcaption>{o.name}</figcaption>
+          <figcaption>
+            <span>{o.name}</span>
+            {limiting && <span className="limiting" title="The safety limiter is holding this speaker at −1 dBFS so it never clips">
+              Limiter −{h!.limiter.toFixed(1)} dB</span>}
+          </figcaption>
+          {s && <dl className="loudness">
+            <div><dt>Now</dt><dd>{lufs(s.momentary_lufs)}</dd></div>
+            <div><dt>3 s</dt><dd>{lufs(s.short_term_lufs)}</dd></div>
+            <div><dt>Overall</dt><dd>{lufs(s.integrated_lufs)}</dd></div>
+            <div><dt>Peak</dt><dd className={(h?.peak ?? -90) > -1.5 ? 'hot' : ''}>{(h?.peak ?? -90) <= -89 ? '–' : `${h!.peak.toFixed(1)}`}</dd></div>
+          </dl>}
         </figure>;
       })}
     </div>}
-    <p className="hint">Measured after bass routing, virtual bass, tone and the Equalizer, so you can see each change. Turn on Virtual bass on a small speaker and watch its 63–250 Hz bars rise.</p>
+    <p className="hint">Measured after bass routing, virtual bass, tone and the Equalizer, so you can see each change. Loudness is in LUFS (Overall counts from when you opened this tab); Peak is in dBFS. A safety limiter keeps every speaker at or below −1 dBFS, so boosts never clip.</p>
   </section>;
 }
 

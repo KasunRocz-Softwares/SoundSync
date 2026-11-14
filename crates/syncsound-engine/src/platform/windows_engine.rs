@@ -692,6 +692,7 @@ impl Core {
                         OutputSpectrum {
                             endpoint_id: s.config.endpoint_id.clone(),
                             levels_db: s.controls.spectrum.levels_db(),
+                            levels: s.controls.levels.take(),
                         }
                     })
                     .collect();

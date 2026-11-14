@@ -20,7 +20,7 @@
   - **Pinned output.** The source stays on one device. SyncSound never switches it to another device automatically.
   - **All apps except SyncSound.** This uses system-wide process-exclusion loopback.
 - Feedback guard: an endpoint that is the capture source cannot also be an enabled output. Capture stops with a "Blocked" state instead of looping.
-- Per-output event-driven WASAPI render worker. Each worker has its own bounded queue and fill-level drift correction (clamped, gradual resampling), manual delay (0–1000 ms), gain, mute, and float/integer sample formats.
+- Up to 16 outputs at once. Per-output event-driven WASAPI render worker. Each worker has its own bounded queue and fill-level drift correction (clamped, gradual resampling), manual delay (0–1000 ms), gain, mute, and float/integer sample formats.
 - Gaming / Balanced / Synchronized modes. Synchronized mode delays faster outputs to the slowest Windows-reported device latency.
 - Per-output recovery: a removed device retries with backoff (1 s up to 30 s, 8 attempts) without stopping the other outputs.
 - Telemetry: buffered ms, estimated latency, drift correction ppm, underruns, and overruns.
@@ -87,11 +87,13 @@ Spatial mode changes only what each speaker plays. Delay, gain, level and alignm
     - which source channels it plays: downmix, front, centre, LFE, side or rear
     - an FIR impulse response (WAV from REW, rePhase…), convolved with zero added latency
     - WASAPI exclusive mode, falling back to shared mode if the device refuses
+- **Safety limiter:** the last stage on every output holds it at or below −1 dBFS (stereo-linked, instant attack, ~150 ms release, no look-ahead, so no added latency and calibration stays valid). EQ boosts, virtual bass and FIR filters can't clip. The Sound tab shows when it is working and by how much.
+- **Meters** (Sound tab, per speaker): the live octave spectrum with peak hold, loudness in LUFS per ITU-R BS.1770 / EBU R128 (momentary 400 ms, short-term 3 s, and gated overall loudness since the tab opened), and the sample peak in dBFS.
 - **Workflow:**
   - **Undo / redo:** Ctrl+Z / Ctrl+Y for any change.
   - **A/B snapshots:** compare two setups with seamless switching.
   - **Settings files:** export to a file and import it on another PC (Settings tab).
-  - **Global hotkeys:** Ctrl+Alt+S routing, Ctrl+Alt+A / Ctrl+Alt+B to compare, Ctrl+Alt+L listening mode, Ctrl+Alt+Z undo.
+  - **Global hotkeys** (Settings tab, all editable): start/stop routing (Ctrl+Alt+S), switch to A or B (Ctrl+Alt+A / B), next listening mode (Ctrl+Alt+L), undo (Ctrl+Alt+Z) and redo, plus mute, louder and quieter (2 dB steps) for each speaker. Click a shortcut and press the keys; use Ctrl, Alt or Win with a key, or an F-key alone. Shortcuts another app already holds are flagged.
 - **Equalizer:** per output, low cut (40–150 Hz) for small speakers, bass (100 Hz), mid (1 kHz) and treble (8 kHz), plus a 10-band graphic EQ (31.5 Hz–16 kHz), each ±12 dB, with presets and a response curve. Room correction aims for a **Warm** (default) or **Flat** target; switching target re-aims the last measurement without measuring again. Boosts lower the level by the same amount so they can't clip.
 
 ## Requirements (Windows 11 x64)
@@ -139,7 +141,7 @@ The script bumps the version, runs the tests, builds the NSIS and MSI installers
 - Windows process-exclusion loopback is system-wide. Excluding SyncSound while capturing one specific endpoint is not supported by the Windows API.
 - Synchronization is estimated, not measured acoustically. Bluetooth codec/transport latency is not reported by Windows and must be compensated manually.
 - Changing delay or mode causes a short audible jump on the affected outputs.
-- The capture format is fixed at 48 kHz stereo float. Multichannel content is downmixed by Windows.
+- Windows on ARM installers are built by CI; a release includes one only when it is built on a PC with the MSVC ARM64 tools (`scripts/release.ps1` checks).
 - Hardware checks for hotplug, sleep/resume, Bluetooth profile switches, and long sessions are listed as unverified in `docs/verification/2026-11-13-windows-release.md`.
 
 ## What SyncSound changes on your PC

@@ -312,8 +312,16 @@ aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .spectrum .bar { width: 100%; height: 100%; background: var(--accent-strong); transform-origin: bottom; transition: transform 90ms linear; }
 .spectrum .bar.low { background: #2fc4ab; }
 .spectrum .bar-labels { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin-top: 4px; font-size: 10px; color: var(--faint); text-align: center; font-variant-numeric: tabular-nums; }
-.spectrum figcaption { font-size: 12.5px; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .spectrum .bar { transition: none; } }
+.spectrum .bar-slot { position: relative; }
+.spectrum .peak-hold { position: absolute; left: 0; right: 0; height: 2px; background: var(--text); opacity: .75; transition: bottom 90ms linear; }
+.spectrum figcaption { font-size: 12.5px; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; }
+.spectrum .limiting { font-size: 11px; font-weight: 600; color: #f0b44c; background: rgba(240, 180, 76, .12); border: 1px solid rgba(240, 180, 76, .35); border-radius: 999px; padding: 1px 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.spectrum .loudness { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--line); }
+.spectrum .loudness div { margin: 0; text-align: center; }
+.spectrum .loudness dt { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.spectrum .loudness dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.spectrum .loudness dd.hot { color: #f0b44c; }
+@media (prefers-reduced-motion: reduce) { .spectrum .bar, .spectrum .peak-hold { transition: none; } }
 
 /* Per-app modes */
 .app-modes { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
@@ -364,3 +372,22 @@ aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .fir { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .fir .ir-name { color: var(--text); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fir button { padding: 5px 10px; font-size: 12.5px; }
+
+/* Shortcut editor */
+.shortcut-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+.shortcut-table th, .shortcut-table td { padding: 6px 4px; border-top: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.shortcut-table th[scope="row"] { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.shortcut-table thead th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
+.shortcut-sub { font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 2px; }
+.key-field { display: inline-flex; align-items: center; gap: 4px; }
+.key-record { min-width: 132px; padding: 5px 10px; font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); background: #0f1621; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; text-align: left; }
+.key-record:hover { border-color: var(--accent); }
+.key-record:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.key-record.recording { border-color: var(--accent); color: var(--accent); }
+.key-record.taken { border-color: var(--warn); color: var(--warn); }
+@media (max-width: 760px) {
+  .shortcut-table.per-output thead { display: none; }
+  .shortcut-table.per-output tr { display: grid; grid-template-columns: 1fr; padding: 6px 0; border-top: 1px solid var(--line); }
+  .shortcut-table.per-output th, .shortcut-table.per-output td { border-top: 0; padding: 3px 4px; }
+  .shortcut-table.per-output td::before { content: attr(data-label); display: inline-block; width: 70px; font-size: 11px; color: var(--faint); }
+}

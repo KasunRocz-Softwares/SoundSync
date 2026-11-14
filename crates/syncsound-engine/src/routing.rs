@@ -159,6 +159,9 @@ pub struct OutputSpectrum {
     pub endpoint_id: String,
     /// Octave bands 31.5 Hz … 16 kHz, dBFS.
     pub levels_db: [f32; 10],
+    /// Loudness (LUFS), sample peak and limiter gain reduction since the last read.
+    #[serde(flatten)]
+    pub levels: crate::meter::LevelReading,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

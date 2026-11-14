@@ -7,8 +7,11 @@
      signing key, so the NSIS installer gets a .sig file.
   3. Writes latest.json, which installed copies read to find updates:
      https://github.com/KasunRocz-Softwares/SoundSync/releases/latest/download/latest.json
-  4. With -Publish: tags v<version>, pushes the tag, and creates the GitHub release with the
-     installer, its signature, the MSI and latest.json.
+  4. Also builds the Windows on ARM (arm64) installer when this PC can: it needs
+     `rustup target add aarch64-pc-windows-msvc` and Visual Studio's "MSVC ARM64 build tools".
+     Without them the release is x64 only (pass -NoArm64 to skip on purpose).
+  5. With -Publish: tags v<version>, pushes the tag, and creates the GitHub release with the
+     installers, their signatures, the MSIs and latest.json.
 
   The private signing key never leaves this PC. Default location:
   %USERPROFILE%\.tauri\syncsound-updater.key (create it with: npx tauri signer generate -w <path>).
@@ -21,7 +24,8 @@ param(
     [string]$Notes = 'See the release page for details.',
     [string]$Repo = 'KasunRocz-Softwares/SoundSync',
     [string]$KeyPath = (Join-Path $env:USERPROFILE '.tauri\syncsound-updater.key'),
-    [switch]$Publish
+    [switch]$Publish,
+    [switch]$NoArm64
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
@@ -82,6 +86,30 @@ $manifest = [ordered]@{
         }
     }
 }
+$assets = @($setup.FullName, $sig.FullName, $msi.FullName)
+
+# Windows on ARM: cross-built with the same updater key.
+$armTarget = 'aarch64-pc-windows-msvc'
+$armLibs = @("${env:ProgramFiles(x86)}\Microsoft Visual Studio", "$env:ProgramFiles\Microsoft Visual Studio") |
+    Where-Object { Test-Path "$_\*\*\VC\Tools\MSVC\*\lib\arm64" }
+$armReady = (-not $NoArm64) -and ((rustup target list --installed) -contains $armTarget) -and $armLibs
+if ($armReady) {
+    Write-Host "==> Building the Windows on ARM installer"
+    $keyPassword | npm run desktop:build -- --target $armTarget
+    if ($LASTEXITCODE -ne 0) { throw "ARM64 build failed with exit code $LASTEXITCODE" }
+    $armSetup = Get-Item "target/$armTarget/release/bundle/nsis/SyncSound_${Version}_arm64-setup.exe"
+    $armSig = Get-Item "$($armSetup.FullName).sig"
+    $armMsi = Get-ChildItem "target/$armTarget/release/bundle/msi/SyncSound_${Version}_arm64*.msi" | Select-Object -First 1
+    $manifest.platforms['windows-aarch64'] = [ordered]@{
+        signature = (Get-Content $armSig.FullName -Raw).Trim()
+        url       = "https://github.com/$Repo/releases/download/$tag/$($armSetup.Name)"
+    }
+    $assets += @($armSetup.FullName, $armSig.FullName)
+    if ($armMsi) { $assets += $armMsi.FullName }
+} elseif (-not $NoArm64) {
+    Write-Warning "Skipping the Windows on ARM installer: install the Rust target ($armTarget) and Visual Studio's MSVC ARM64 build tools to include it."
+}
+
 $latest = 'target/release/bundle/latest.json'
 Write-Utf8 $latest ($manifest | ConvertTo-Json -Depth 5)
 Write-Host "==> Wrote $latest"
@@ -97,6 +125,6 @@ git tag -a $tag -m "SyncSound $Version"
 if ($LASTEXITCODE -ne 0) { throw "Tag $tag already exists" }
 git push origin $tag
 if ($LASTEXITCODE -ne 0) { throw 'Pushing the tag failed' }
-gh release create $tag $setup.FullName $sig.FullName $msi.FullName $latest --repo $Repo --title "SyncSound $Version" --notes "$Notes`n`n[Code signing policy](https://github.com/$Repo/blob/main/docs/CODE_SIGNING.md)"
+gh release create $tag @assets $latest --repo $Repo --title "SyncSound $Version" --notes "$Notes`n`n[Code signing policy](https://github.com/$Repo/blob/main/docs/CODE_SIGNING.md)"
 if ($LASTEXITCODE -ne 0) { throw 'Creating the GitHub release failed' }
 Write-Host "==> Published https://github.com/$Repo/releases/tag/$tag"

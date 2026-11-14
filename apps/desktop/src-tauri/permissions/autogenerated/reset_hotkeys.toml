@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reset-hotkeys"
+description = "Enables the reset_hotkeys command without any pre-configured scope."
+commands.allow = ["reset_hotkeys"]
+
+[[permission]]
+identifier = "deny-reset-hotkeys"
+description = "Denies the reset_hotkeys command without any pre-configured scope."
+commands.deny = ["reset_hotkeys"]

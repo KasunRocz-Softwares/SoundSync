@@ -9,6 +9,15 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            name: x64
+          # Windows on ARM (Snapdragon laptops). Cross-built on the x64 runner.
+          - target: aarch64-pc-windows-msvc
+            name: arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,15 +25,21 @@ jobs:
           node-version: '22'
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
       - run: npm ci
       - run: npm run build
+      - if: matrix.name == 'x64'
+        run: cargo test --workspace
       # CI builds are unsigned for the updater; signed releases come from scripts/release.ps1.
-      - run: npm run desktop:build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - run: npm run desktop:build -- --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@v4
         with:
-          name: SyncSound-Windows-Installers
+          name: SyncSound-Windows-${{ matrix.name }}-Installers
           path: |
-            target/release/bundle/nsis/*.exe
-            target/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
           if-no-files-found: error

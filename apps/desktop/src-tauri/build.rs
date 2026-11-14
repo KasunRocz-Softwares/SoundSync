@@ -46,6 +46,8 @@ const COMMANDS: &[&str] = &[
     "enable_virtual_speaker",
     "disable_virtual_speaker",
     "hotkey_status",
+    "set_hotkey",
+    "reset_hotkeys",
     "workflow_status",
     "checkpoint",
     "undo",

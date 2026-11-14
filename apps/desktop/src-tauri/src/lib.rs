@@ -57,7 +57,9 @@ pub(crate) fn apply_profile(
         .map_err(engine_error)?;
     engine.set_spatial(plan.spatial).map_err(engine_error)?;
     engine.set_sound(plan.sound).map_err(engine_error)?;
-    engine.set_app_modes(plan.app_modes.clone()).map_err(engine_error)?;
+    engine
+        .set_app_modes(plan.app_modes.clone())
+        .map_err(engine_error)?;
     if let Some(source) = plan.source.clone() {
         if source != current.source {
             engine.set_source(source).map_err(engine_error)?;
@@ -314,7 +316,7 @@ async fn set_app_settings(
     settings.close_to_tray = close_to_tray;
     if let Some(on) = hotkeys {
         settings.hotkeys = on;
-        workflow::set_hotkeys(&app, on);
+        workflow::set_hotkeys(&app, on, &settings.hotkey_bindings);
     }
     system::save_settings(&state.data_dir, &settings)?;
     Ok(settings.clone())
@@ -323,20 +325,61 @@ async fn set_app_settings(
 #[derive(Serialize)]
 struct HotkeyStatus {
     enabled: bool,
-    keys: Vec<&'static str>,
-    /// Keys another app already uses.
-    refused: Vec<&'static str>,
+    bindings: Vec<workflow::HotkeyBinding>,
+    /// Actions whose keys another app already uses.
+    refused: Vec<String>,
+}
+
+fn hotkey_report(app: &tauri::AppHandle, settings: &system::AppSettings) -> HotkeyStatus {
+    let refused = workflow::set_hotkeys(app, settings.hotkeys, &settings.hotkey_bindings);
+    HotkeyStatus {
+        enabled: settings.hotkeys,
+        bindings: settings.hotkey_bindings.clone(),
+        refused,
+    }
 }
 
 #[tauri::command]
-async fn hotkey_status(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<HotkeyStatus> {
-    let enabled = state.settings.lock().unwrap().hotkeys;
-    let refused = workflow::set_hotkeys(&app, enabled);
-    Ok(HotkeyStatus {
-        enabled,
-        keys: workflow::hotkey_help(),
-        refused,
-    })
+async fn hotkey_status(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<HotkeyStatus> {
+    let settings = state.settings.lock().unwrap().clone();
+    Ok(hotkey_report(&app, &settings))
+}
+
+/// Sets the keys for one action ("" turns it off). Rejects keys another
+/// SyncSound shortcut already uses.
+#[tauri::command]
+async fn set_hotkey(
+    action: String,
+    keys: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<HotkeyStatus> {
+    let settings = {
+        let mut settings = state.settings.lock().unwrap();
+        settings.hotkey_bindings =
+            workflow::update_bindings(&settings.hotkey_bindings, &action, &keys)?;
+        system::save_settings(&state.data_dir, &settings)?;
+        settings.clone()
+    };
+    Ok(hotkey_report(&app, &settings))
+}
+
+/// Puts every shortcut back to its default and removes per-speaker ones.
+#[tauri::command]
+async fn reset_hotkeys(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<HotkeyStatus> {
+    let settings = {
+        let mut settings = state.settings.lock().unwrap();
+        settings.hotkey_bindings = workflow::default_bindings();
+        system::save_settings(&state.data_dir, &settings)?;
+        settings.clone()
+    };
+    Ok(hotkey_report(&app, &settings))
 }
 
 #[tauri::command]
@@ -480,9 +523,7 @@ async fn set_device_advanced(
     validate_endpoint_id(&id, &snapshot.endpoints)?;
     if let Some(path) = &convolution {
         let p = std::path::Path::new(path);
-        let is_wav = p
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("wav"));
+        let is_wav = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"));
         if path.len() > 1024 || !p.is_absolute() || !is_wav || !p.is_file() {
             return Err(CommandError::new(
                 "invalid_convolution",
@@ -532,7 +573,10 @@ async fn apply_listening_mode(
     mode: syncsound_engine::enhance::ListeningMode,
     state: State<'_, AppState>,
 ) -> CmdResult<()> {
-    state.engine.apply_listening_mode(mode).map_err(engine_error)
+    state
+        .engine
+        .apply_listening_mode(mode)
+        .map_err(engine_error)
 }
 
 #[tauri::command]
@@ -704,8 +748,8 @@ pub fn run() {
             }
             system::create_tray(app.handle())?;
             app.handle().plugin(workflow::hotkey_plugin())?;
-            let hotkeys_on = app.state::<AppState>().settings.lock().unwrap().hotkeys;
-            workflow::set_hotkeys(app.handle(), hotkeys_on);
+            let settings = app.state::<AppState>().settings.lock().unwrap().clone();
+            workflow::set_hotkeys(app.handle(), settings.hotkeys, &settings.hotkey_bindings);
             // Restore off the UI thread; the engine call can take a moment.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -775,6 +819,8 @@ pub fn run() {
             enable_virtual_speaker,
             disable_virtual_speaker,
             hotkey_status,
+            set_hotkey,
+            reset_hotkeys,
             workflow::workflow_status,
             workflow::checkpoint,
             workflow::undo,

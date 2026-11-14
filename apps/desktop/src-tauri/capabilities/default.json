@@ -53,6 +53,8 @@
     "allow-enable-virtual-speaker",
     "allow-disable-virtual-speaker",
     "allow-hotkey-status",
+    "allow-set-hotkey",
+    "allow-reset-hotkeys",
     "allow-workflow-status",
     "allow-checkpoint",
     "allow-undo",

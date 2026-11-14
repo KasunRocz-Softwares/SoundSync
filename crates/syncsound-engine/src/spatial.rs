@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
-/// Two speaker points per output (its left and right channel), up to 8 outputs.
-pub const MAX_POINTS: usize = 16;
+/// Two speaker points per output (its left and right channel), up to 16 outputs.
+pub const MAX_POINTS: usize = 32;
 pub const MAX_VIRTUAL: usize = 7;
 pub const MIN_ROTATION_S: f32 = 2.0;
 pub const MAX_ROTATION_S: f32 = 60.0;

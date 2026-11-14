@@ -5,14 +5,15 @@
 use crate::dsp::DspError;
 use crate::enhance::{EnhanceProcessor, EnhanceShared, SpectrumMeter, SpectrumShared};
 use crate::eq::{EqProcessor, EqShared};
+use crate::meter::{LevelShared, Limiter, LoudnessMeter};
 use crate::spatial::{virtual_channels, GainMatrix, LowPass, SpatialShared, MAX_VIRTUAL};
 use crate::{PcmConsumer, PcmFormat};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
-/// v0.1 limit on simultaneously enabled outputs.
-pub const MAX_ENABLED_OUTPUTS: usize = 8;
+/// Limit on simultaneously enabled outputs.
+pub const MAX_ENABLED_OUTPUTS: usize = 16;
 /// Manual per-output delay bound.
 pub const MAX_OUTPUT_DELAY_MS: u32 = 1_000;
 /// Callbacks averaged after a capture discontinuity before the one-shot resync.
@@ -236,6 +237,8 @@ pub struct OutputControls {
     source_channels: AtomicU8,
     /// FIR convolver hand-off (see `convolve`).
     pub convolver: crate::convolve::ConvolverSlot,
+    /// Loudness, peak and limiter readings.
+    pub levels: LevelShared,
 }
 
 impl OutputControls {
@@ -257,6 +260,7 @@ impl OutputControls {
             spectrum: SpectrumShared::default(),
             source_channels: AtomicU8::new(0),
             convolver: crate::convolve::ConvolverSlot::default(),
+            levels: LevelShared::default(),
         }
     }
     pub fn source_channels(&self) -> SourceChannels {
@@ -454,6 +458,9 @@ pub struct RenderPipeline {
     enhance: EnhanceProcessor,
     meter: SpectrumMeter,
     conv: Box<Option<crate::convolve::StereoConvolver>>,
+    limiter: Limiter,
+    loudness: LoudnessMeter,
+    was_metering: bool,
 }
 
 /// Every output renders stereo; WASAPI's shared-mode matrixer adapts it to the device.
@@ -508,6 +515,9 @@ impl RenderPipeline {
             enhance: EnhanceProcessor::new(format.sample_rate),
             meter: SpectrumMeter::new(format.sample_rate),
             conv: Box::new(None),
+            limiter: Limiter::new(format.sample_rate),
+            loudness: LoudnessMeter::new(format.sample_rate),
+            was_metering: false,
         })
     }
 
@@ -800,12 +810,25 @@ impl RenderPipeline {
         if let Some(conv) = self.conv.as_mut() {
             conv.process_interleaved(&mut output[..frames_out * OUTPUT_CHANNELS]);
         }
+        // Safety limiter: the last stage, so EQ, virtual bass and FIR can never clip.
+        for f in output[..frames_out * OUTPUT_CHANNELS].chunks_exact_mut(OUTPUT_CHANNELS) {
+            self.limiter.process(f);
+        }
+        self.controls
+            .levels
+            .publish_limiter(self.limiter.take_reduction_db());
         if metering {
+            if !self.was_metering {
+                self.loudness.reset();
+            }
             for f in output.chunks_exact(OUTPUT_CHANNELS) {
                 self.meter.push(f);
+                self.loudness.push(f);
             }
             self.meter.publish(&self.controls.spectrum);
+            self.controls.levels.publish_loudness(&mut self.loudness);
         }
+        self.was_metering = metering;
         self.publish_metrics(frames_out, self.primed);
     }
 
@@ -1193,8 +1216,10 @@ mod tests {
                 &out[..2]
             );
         };
-        pipeline.render(&mut out); // prime
+        // The default downmix of this frame exceeds full scale (the limiter
+        // would catch it), so prime on a single channel.
         controls.set_source_channels(SourceChannels::Center);
+        pipeline.render(&mut out); // prime
         check(&mut pipeline, &mut out, 0.3, 0.3);
         controls.set_source_channels(SourceChannels::Rear);
         check(&mut pipeline, &mut out, 0.5, 0.6);
@@ -1206,7 +1231,10 @@ mod tests {
         let k = std::f32::consts::FRAC_1_SQRT_2;
         let dl = (0.1 + k * (0.3 + 0.5 + 0.7)) * k;
         let dr = (0.2 + k * (0.3 + 0.6 + 0.8)) * k;
-        check(&mut pipeline, &mut out, dl, dr);
+        // dr is above −1 dBFS: the safety limiter scales the pair down to the ceiling.
+        let limit = crate::meter::LIMIT_CEILING / dl.max(dr);
+        assert!(limit < 1.0);
+        check(&mut pipeline, &mut out, dl * limit, dr * limit);
     }
 
     #[test]

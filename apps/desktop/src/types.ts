@@ -63,7 +63,13 @@ export type SoundSettings = {
 };
 export type ListeningMode = 'custom' | 'music' | 'movie' | 'game' | 'voice';
 export type AppMode = { exe: string; mode: ListeningMode };
-export type OutputSpectrum = { endpoint_id: string; levels_db: number[] };
+export type OutputSpectrum = {
+  endpoint_id: string; levels_db: number[];
+  /** BS.1770 loudness since the Sound tab opened; −70 = silence. */
+  momentary_lufs: number; short_term_lufs: number; integrated_lufs: number;
+  /** Highest sample (dBFS) and deepest limiter gain reduction (dB) since the last read. */
+  peak_db: number; limiter_db: number;
+};
 export const CROSSOVER_OPTIONS = [60, 80, 100, 120, 150];
 export const ROOM_BANDS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 export type RoomResult = { response_db: (number | null)[]; correction_db: number[]; snr_db: number };
@@ -71,7 +77,10 @@ export type RoomOutput = { endpoint_id: string; name: string; applied: boolean; 
 export type RoomReport = { microphone: string; message: string; outputs: RoomOutput[] };
 export type AppSettings = { restore_last_session: boolean; auto_start_routing: boolean; close_to_tray: boolean; hotkeys: boolean };
 export type WorkflowStatus = { can_undo: boolean; can_redo: boolean; ab_stored: [boolean, boolean]; ab_active: number | null };
-export type HotkeyStatus = { enabled: boolean; keys: string[]; refused: string[] };
+/** `action` is toggle_routing, recall_a, recall_b, next_mode, undo, redo, or
+ *  mute:<id> / louder:<id> / quieter:<id> for one speaker. Empty keys = off. */
+export type HotkeyBinding = { action: string; keys: string };
+export type HotkeyStatus = { enabled: boolean; bindings: HotkeyBinding[]; refused: string[] };
 export type VirtualSpeakerStatus = {
   installed: boolean; cable_name: string | null; active: boolean; default_is_cable: boolean; previous_default_name: string | null;
 };
@@ -154,7 +163,7 @@ export type ProfileLoadReport = {
 
 export type CommandError = { code: string; message: string };
 
-export const MAX_ENABLED_OUTPUTS = 8;
+export const MAX_ENABLED_OUTPUTS = 16;
 export const MAX_DELAY_MS = 1000;
 export const MIN_DISTANCE_M = 0.2;
 export const MAX_DISTANCE_M = 20;

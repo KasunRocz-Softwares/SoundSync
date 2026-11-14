@@ -1,16 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as autostartEnabled } from '@tauri-apps/plugin-autostart';
-import { FileDown, FileUp, Keyboard } from 'lucide-react';
+import { FileDown, FileUp } from 'lucide-react';
 import { api, errorMessage } from './api';
-import type { AppSettings, HotkeyStatus } from './types';
+import type { AppSettings, OutputStatus } from './types';
+import { ShortcutsCard } from './Shortcuts';
 
 type Message = { tone: 'ok' | 'bad'; text: string } | null;
 
 /** Start with Windows, restore the last setup, tray behaviour, hotkeys and settings files. */
-export function SettingsPanel({ onChange }: { onChange: () => void }) {
+export function SettingsPanel({ onChange, outputs }: { onChange: () => void; outputs: OutputStatus[] }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [autostart, setAutostart] = useState(false);
-  const [hotkeys, setHotkeys] = useState<HotkeyStatus | null>(null);
   const [message, setMessage] = useState<Message>(null);
   const [fileMessage, setFileMessage] = useState<Message>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -18,7 +18,6 @@ export function SettingsPanel({ onChange }: { onChange: () => void }) {
   useEffect(() => {
     api.settings().then(s => setSettings(s), e => setMessage({ tone: 'bad', text: errorMessage(e) }));
     autostartEnabled().then(setAutostart, () => setAutostart(false));
-    api.hotkeyStatus().then(setHotkeys, () => setHotkeys(null));
   }, []);
 
   const update = (patch: Partial<AppSettings>) => {
@@ -28,7 +27,6 @@ export function SettingsPanel({ onChange }: { onChange: () => void }) {
     api.saveSettings(next).then(
       s => {
         setSettings(s); setMessage({ tone: 'ok', text: 'Saved.' });
-        if ('hotkeys' in patch) api.hotkeyStatus().then(setHotkeys, () => undefined);
       },
       e => setMessage({ tone: 'bad', text: errorMessage(e) }),
     );
@@ -81,20 +79,7 @@ export function SettingsPanel({ onChange }: { onChange: () => void }) {
       {message && <p className={message.tone === 'ok' ? 'field-ok' : 'field-error'} role="status">{message.text}</p>}
     </section>
 
-    <section className="panel settings">
-      <h2><Keyboard size={16} /> Shortcuts</h2>
-      <label className="setting">
-        <input type="checkbox" checked={settings?.hotkeys ?? true} disabled={!settings}
-          onChange={e => update({ hotkeys: e.target.checked })} />
-        <span><strong>Global hotkeys</strong><small>Work anywhere in Windows, even when SyncSound is in the tray.</small></span>
-      </label>
-      {hotkeys && <ul className="hotkeys">
-        {hotkeys.keys.map(k => <li key={k} className={hotkeys.refused.includes(k) ? 'taken' : ''}>
-          {k}{hotkeys.refused.includes(k) && <em> (used by another app)</em>}
-        </li>)}
-      </ul>}
-      <p className="hint">Inside SyncSound: Ctrl+Z undoes the last change, Ctrl+Y redoes it. Save two setups as A and B with the small save buttons at the top, then click A or B to compare them instantly.</p>
-    </section>
+    <ShortcutsCard enabled={settings ? settings.hotkeys : null} onToggle={on => update({ hotkeys: on })} outputs={outputs} />
 
     <section className="panel settings">
       <h2>Settings file</h2>

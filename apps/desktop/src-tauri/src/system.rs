@@ -29,8 +29,10 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     /// Present while the virtual speaker mode is on.
     pub virtual_speaker: Option<VirtualSpeaker>,
-    /// System-wide Ctrl+Alt shortcuts (routing, A/B, listening mode, undo).
+    /// Global shortcuts on or off.
     pub hotkeys: bool,
+    /// Which keys run which action (see `workflow::HotkeyBinding`).
+    pub hotkey_bindings: Vec<crate::workflow::HotkeyBinding>,
 }
 
 impl Default for AppSettings {
@@ -41,6 +43,7 @@ impl Default for AppSettings {
             close_to_tray: true,
             virtual_speaker: None,
             hotkeys: true,
+            hotkey_bindings: crate::workflow::default_bindings(),
         }
     }
 }

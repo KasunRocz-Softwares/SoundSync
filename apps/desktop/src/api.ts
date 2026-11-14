@@ -62,6 +62,8 @@ export const api = {
     hotkeys: s.hotkeys,
   }),
   hotkeyStatus: () => invoke<HotkeyStatus>('hotkey_status'),
+  setHotkey: (action: string, keys: string) => invoke<HotkeyStatus>('set_hotkey', { action, keys }),
+  resetHotkeys: () => invoke<HotkeyStatus>('reset_hotkeys'),
   workflow: () => invoke<WorkflowStatus>('workflow_status'),
   checkpoint: () => invoke<WorkflowStatus>('checkpoint'),
   undo: () => invoke<WorkflowStatus>('undo'),

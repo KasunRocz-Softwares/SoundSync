@@ -534,7 +534,7 @@ function App() {
       {tab === 'apps' && <AppsPanel snapshot={snapshot} act={act} />}
       {tab === 'sound' && <SoundPanel snapshot={snapshot} act={act} />}
       {tab === 'eq' && <EqPanel snapshot={snapshot} act={act} />}
-      {tab === 'settings' && <SettingsPanel onChange={() => void poll()} />}
+      {tab === 'settings' && <SettingsPanel outputs={snapshot?.outputs ?? []} onChange={() => void poll()} />}
 
       <footer>
         <span>Capture format {snapshot ? `${snapshot.capture_format.sample_rate.toLocaleString()} Hz · ${snapshot.capture_format.channels} ch float` : '—'}</span>

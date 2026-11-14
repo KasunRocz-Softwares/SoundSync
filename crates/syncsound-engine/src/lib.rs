@@ -13,6 +13,7 @@ pub mod diagnostics;
 pub mod dsp;
 pub mod enhance;
 pub mod eq;
+pub mod meter;
 pub mod metrics;
 pub mod mixer;
 pub mod output_state;

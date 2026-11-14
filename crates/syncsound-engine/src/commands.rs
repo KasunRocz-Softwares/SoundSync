@@ -182,14 +182,14 @@ mod tests {
     }
 
     #[test]
-    fn enforces_eight_output_limit_but_allows_reenable() {
-        let enabled: Vec<String> = (0..8).map(|i| i.to_string()).collect();
+    fn enforces_output_limit_but_allows_reenable() {
+        let enabled: Vec<String> = (0..MAX_ENABLED_OUTPUTS).map(|i| i.to_string()).collect();
         assert_eq!(
-            validate_enable("8", &enabled).unwrap_err().code,
+            validate_enable("new", &enabled).unwrap_err().code,
             "too_many_outputs"
         );
         assert!(validate_enable("3", &enabled).is_ok());
-        assert!(validate_enable("x", &enabled[..7]).is_ok());
+        assert!(validate_enable("x", &enabled[..MAX_ENABLED_OUTPUTS - 1]).is_ok());
     }
 
     #[test]
