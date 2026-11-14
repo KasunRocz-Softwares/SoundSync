@@ -18,6 +18,39 @@
     })
     .catch(() => { /* keep the link to the releases page */ });
 
+  // Totals: installer downloads from every GitHub release (the in-app updater's
+  // downloads included), and site visits from a public counter.
+  const fmt = n => Number(n).toLocaleString('en-US');
+  const show = (id, value) => {
+    document.getElementById(id).textContent = fmt(value);
+    document.getElementById(`${id}-wrap`).hidden = false;
+  };
+  fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`)
+    .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then(releases => {
+      const total = releases
+        .flatMap(rel => rel.assets || [])
+        .filter(a => /\.(exe|msi)$/i.test(a.name))
+        .reduce((sum, a) => sum + (a.download_count || 0), 0);
+      show('stat-downloads', total);
+    })
+    .catch(() => { /* leave hidden */ });
+
+  // Count one visit per browser session, and only on the real site, not previews.
+  const COUNTER = 'https://abacus.jasoncameron.dev';
+  const KEY = 'kasunrocz-syncsound/visits';
+  const live = location.hostname.endsWith('github.io');
+  let counted = false;
+  try { counted = sessionStorage.getItem('ss-visit') === '1'; } catch { /* storage blocked */ }
+  const action = live && !counted ? 'hit' : 'get';
+  fetch(`${COUNTER}/${action}/${KEY}`)
+    .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then(d => {
+      if (typeof d.value === 'number' && d.value >= 0) show('stat-visits', d.value);
+      if (action === 'hit') { try { sessionStorage.setItem('ss-visit', '1'); } catch { /* ignore */ } }
+    })
+    .catch(() => { /* leave hidden */ });
+
   // Scroll reveal.
   const items = document.querySelectorAll('.reveal');
   if (reduce || !('IntersectionObserver' in window)) {
