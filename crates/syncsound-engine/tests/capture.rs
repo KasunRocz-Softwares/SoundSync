@@ -208,6 +208,40 @@ fn capture_packets_split_into_bounded_float_blocks_with_qpc_timestamps() {
 }
 
 #[test]
+fn resampled_capture_stays_contiguous_until_a_real_gap() {
+    // Capturing at 2× the device mix rate: Windows' device_position advances
+    // at the mix rate, so it moves 1 per 2 delivered frames. QPC is steady.
+    let (mut writer, mut reader) = PacketPublisher::new(&config()).unwrap();
+    let mut out = [0.0; 2];
+    let frame_100ns = 10_000_000.0 / 48_000.0;
+    for k in 0..6u64 {
+        let status = writer.publish(Packet {
+            frames: 2,
+            silent: true,
+            device_position: 1_000 + k,
+            qpc_100ns: 10_000_000 + (k as f64 * 2.0 * frame_100ns) as u64,
+            ..Packet::default()
+        });
+        assert_eq!(status, QueueStatus::Ok);
+        assert_eq!(
+            reader.pop_into(&mut out),
+            Ok((48_000 + 2 * k, 2)),
+            "packet {k} must follow on"
+        );
+    }
+    // A real 100 ms hole in the stream re-anchors on the timestamp.
+    writer.publish(Packet {
+        frames: 2,
+        silent: true,
+        device_position: 1_010,
+        qpc_100ns: 10_000_000 + (12.0 * frame_100ns) as u64 + 1_000_000,
+        ..Packet::default()
+    });
+    let (first, _) = reader.pop_into(&mut out).unwrap();
+    assert!(first >= 48_000 + 12 + 4_700, "re-anchored after the gap: {first}");
+}
+
+#[test]
 fn capture_discontinuity_bad_timestamp_and_full_queue_discard_stale_audio() {
     let (mut writer, mut reader) = PacketPublisher::new(&config()).unwrap();
     writer.publish(Packet {

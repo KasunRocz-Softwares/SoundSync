@@ -349,3 +349,18 @@ aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .hotkeys { list-style: none; margin: 4px 0 0; padding: 0 0 0 29px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hotkeys li.taken { color: var(--warn); }
 .file-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* Engine format and advanced output options */
+.format-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 16px; }
+.format-row label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+.panel .format-row select { width: 130px; }
+.advanced { margin-top: 12px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.advanced summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.advanced summary:hover { color: var(--text); }
+.advanced-grid { display: grid; gap: 12px; margin-top: 12px; }
+.advanced-grid > label:not(.check) { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.advanced-grid select { width: auto; min-width: 220px; }
+.advanced-grid .check .muted { margin-left: 4px; }
+.fir { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.fir .ir-name { color: var(--text); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fir button { padding: 5px 10px; font-size: 12.5px; }

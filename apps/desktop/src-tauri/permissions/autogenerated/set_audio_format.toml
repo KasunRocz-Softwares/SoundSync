@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-audio-format"
+description = "Enables the set_audio_format command without any pre-configured scope."
+commands.allow = ["set_audio_format"]
+
+[[permission]]
+identifier = "deny-set-audio-format"
+description = "Denies the set_audio_format command without any pre-configured scope."
+commands.deny = ["set_audio_format"]

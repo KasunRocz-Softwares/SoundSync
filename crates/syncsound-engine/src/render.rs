@@ -85,6 +85,77 @@ impl ChannelRole {
     }
 }
 
+/// Which channels of a multichannel (5.1 / 7.1) source an output plays.
+/// Every output renders stereo; this picks or downmixes into its two channels.
+/// Channel order follows Windows: FL FR C LFE BL BR (5.1) and … SL SR (7.1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceChannels {
+    /// All channels folded into stereo (front + 0.707 × centre and surrounds).
+    #[default]
+    Downmix,
+    Front,
+    Center,
+    Lfe,
+    Side,
+    Rear,
+}
+
+pub const MAX_SOURCE_CHANNELS: usize = 8;
+
+impl SourceChannels {
+    fn to_u8(self) -> u8 {
+        match self {
+            SourceChannels::Downmix => 0,
+            SourceChannels::Front => 1,
+            SourceChannels::Center => 2,
+            SourceChannels::Lfe => 3,
+            SourceChannels::Side => 4,
+            SourceChannels::Rear => 5,
+        }
+    }
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => SourceChannels::Front,
+            2 => SourceChannels::Center,
+            3 => SourceChannels::Lfe,
+            4 => SourceChannels::Side,
+            5 => SourceChannels::Rear,
+            _ => SourceChannels::Downmix,
+        }
+    }
+
+    /// One source frame (any channel count) → this output's stereo pair.
+    #[inline]
+    pub fn map(self, v: &[f32]) -> (f32, f32) {
+        let at = |i: usize| v.get(i).copied().unwrap_or(0.0);
+        match v.len() {
+            0 => (0.0, 0.0),
+            1 => (v[0], v[0]),
+            2 => (v[0], v[1]),
+            n => {
+                // 5.1 has its surrounds at 4/5; 7.1 adds sides at 6/7.
+                let (sl, sr) = if n >= 8 { (at(6), at(7)) } else { (at(4), at(5)) };
+                let (bl, br) = (at(4), at(5));
+                const K: f32 = std::f32::consts::FRAC_1_SQRT_2;
+                match self {
+                    SourceChannels::Downmix => {
+                        let surround = n >= 8;
+                        let l = at(0) + K * at(2) + K * bl + if surround { K * sl } else { 0.0 };
+                        let r = at(1) + K * at(2) + K * br + if surround { K * sr } else { 0.0 };
+                        (l * K, r * K)
+                    }
+                    SourceChannels::Front => (at(0), at(1)),
+                    SourceChannels::Center => (at(2), at(2)),
+                    SourceChannels::Lfe => (at(3), at(3)),
+                    SourceChannels::Side => (sl, sr),
+                    SourceChannels::Rear => (bl, br),
+                }
+            }
+        }
+    }
+}
+
 /// Scheduling budgets, not acoustic promises.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct ModePolicy {
@@ -162,6 +233,9 @@ pub struct OutputControls {
     pub enhance: EnhanceShared,
     /// Octave-band levels of what this output plays, while someone watches.
     pub spectrum: SpectrumShared,
+    source_channels: AtomicU8,
+    /// FIR convolver hand-off (see `convolve`).
+    pub convolver: crate::convolve::ConvolverSlot,
 }
 
 impl OutputControls {
@@ -181,7 +255,15 @@ impl OutputControls {
             eq: EqShared::new(),
             enhance: EnhanceShared::default(),
             spectrum: SpectrumShared::default(),
+            source_channels: AtomicU8::new(0),
+            convolver: crate::convolve::ConvolverSlot::default(),
         }
+    }
+    pub fn source_channels(&self) -> SourceChannels {
+        SourceChannels::from_u8(self.source_channels.load(Ordering::Relaxed))
+    }
+    pub fn set_source_channels(&self, map: SourceChannels) {
+        self.source_channels.store(map.to_u8(), Ordering::Relaxed);
     }
     pub fn spatial_slot(&self) -> Option<usize> {
         let slot = self.spatial_slot.load(Ordering::Relaxed);
@@ -273,6 +355,8 @@ pub struct OutputMetrics {
     device_padding_frames: AtomicU64,
     device_stream_latency_frames: AtomicU64,
     primed: AtomicBool,
+    /// The render worker got WASAPI exclusive mode.
+    pub exclusive_active: AtomicBool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -369,7 +453,11 @@ pub struct RenderPipeline {
     eq: EqProcessor,
     enhance: EnhanceProcessor,
     meter: SpectrumMeter,
+    conv: Box<Option<crate::convolve::StereoConvolver>>,
 }
+
+/// Every output renders stereo; WASAPI's shared-mode matrixer adapts it to the device.
+pub const OUTPUT_CHANNELS: usize = 2;
 
 impl RenderPipeline {
     /// Control-thread constructor: every buffer used by `render` is allocated here.
@@ -419,6 +507,7 @@ impl RenderPipeline {
             eq: EqProcessor::default(),
             enhance: EnhanceProcessor::new(format.sample_rate),
             meter: SpectrumMeter::new(format.sample_rate),
+            conv: Box::new(None),
         })
     }
 
@@ -533,11 +622,12 @@ impl RenderPipeline {
             .min(self.ring_frames - 1)
     }
 
-    /// Fills `output` (interleaved, source channel layout) with exactly
-    /// `output.len() / channels` frames. Underruns render silence and re-prime.
+    /// Fills `output` (interleaved stereo) with exactly `output.len() / 2`
+    /// frames. Multichannel sources are mapped to this output's pair first.
+    /// Underruns render silence and re-prime.
     pub fn render(&mut self, output: &mut [f32]) {
         let ch = self.channels;
-        let frames_out = output.len() / ch;
+        let frames_out = output.len() / OUTPUT_CHANNELS;
         self.ingest();
         self.apply_delay_change();
         let target = self.target_frames();
@@ -631,6 +721,10 @@ impl RenderPipeline {
         self.eq.refresh(&self.controls.eq);
         self.enhance.refresh(&self.controls.enhance);
         let metering = self.controls.spectrum.watching();
+        let source_map = self.controls.source_channels();
+        let src_ch = ch.min(MAX_SOURCE_CHANNELS);
+        let mut source = [0.0f32; MAX_SOURCE_CHANNELS];
+        self.controls.convolver.swap_into(&mut self.conv);
         let gain_step = if frames_out > 0 {
             (target_gain - self.gain) / frames_out as f32
         } else {
@@ -640,7 +734,7 @@ impl RenderPipeline {
         let mut frame = 0;
         while frame < frames_out {
             self.gain += gain_step;
-            let out = &mut output[frame * ch..(frame + 1) * ch];
+            let out = &mut output[frame * OUTPUT_CHANNELS..(frame + 1) * OUTPUT_CHANNELS];
             if self.silence_pending > 0 {
                 out.fill(0.0);
                 self.silence_pending -= 1;
@@ -648,7 +742,7 @@ impl RenderPipeline {
                 continue;
             }
             if self.len < 2 {
-                output[frame * ch..].fill(0.0);
+                output[frame * OUTPUT_CHANNELS..].fill(0.0);
                 self.metrics.record_underrun();
                 self.primed = false;
                 break;
@@ -656,11 +750,14 @@ impl RenderPipeline {
             let a = self.read;
             let b = (self.read + 1) % self.ring_frames;
             let fraction = self.phase as f32;
-            for c in 0..ch {
+            for (c, s) in source.iter_mut().enumerate().take(src_ch) {
                 let left = self.ring[a * ch + c];
                 let right = self.ring[b * ch + c];
-                out[c] = left + (right - left) * fraction;
+                *s = left + (right - left) * fraction;
             }
+            let (l, r) = source_map.map(&source[..src_ch]);
+            out[0] = l;
+            out[1] = r;
             // Normalize / night mode act on the source, before this output's volume.
             self.enhance.dynamics(out);
             for s in out.iter_mut() {
@@ -691,9 +788,6 @@ impl RenderPipeline {
             }
             self.enhance.process(out);
             self.eq.process(out);
-            if metering {
-                self.meter.push(out);
-            }
             self.phase += ratio;
             while self.phase >= 1.0 && self.len > 0 {
                 self.phase -= 1.0;
@@ -702,7 +796,14 @@ impl RenderPipeline {
             frame += 1;
         }
         self.gain = target_gain;
+        // FIR convolution works on blocks, after the per-sample chain.
+        if let Some(conv) = self.conv.as_mut() {
+            conv.process_interleaved(&mut output[..frames_out * OUTPUT_CHANNELS]);
+        }
         if metering {
+            for f in output.chunks_exact(OUTPUT_CHANNELS) {
+                self.meter.push(f);
+            }
             self.meter.publish(&self.controls.spectrum);
         }
         self.publish_metrics(frames_out, self.primed);
@@ -1058,6 +1159,54 @@ mod tests {
         let mut mono = [0.3];
         ChannelRole::LeftOnly.apply(&mut mono);
         assert_eq!(mono, [0.3]);
+    }
+
+    #[test]
+    fn seven_one_source_maps_each_output_to_its_channels() {
+        let format = PcmFormat {
+            sample_rate: 48_000,
+            channels: 8,
+        };
+        let (mut producer, consumer) = BoundedPcmQueue::new(format, 64, 480).unwrap().into_spsc();
+        let controls = Arc::new(OutputControls::new(
+            1.0,
+            false,
+            0,
+            AudioMode::Balanced.policy(),
+            48_000,
+        ));
+        let metrics = Arc::new(OutputMetrics::default());
+        let mut pipeline =
+            RenderPipeline::new(consumer, format, 480, controls.clone(), metrics).unwrap();
+        // FL FR C LFE BL BR SL SR, each channel a distinct constant.
+        let frame = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+        for i in 0..12u64 {
+            let samples: Vec<f32> = (0..480).flat_map(|_| frame).collect();
+            producer.push_samples(i * 480, &samples);
+        }
+        let mut out = vec![0.0f32; 480 * 2];
+        let check = |pipeline: &mut RenderPipeline, out: &mut Vec<f32>, l: f32, r: f32| {
+            pipeline.render(out);
+            assert!(
+                out.chunks(2).all(|f| (f[0] - l).abs() < 1e-5 && (f[1] - r).abs() < 1e-5),
+                "expected ({l}, {r}), got {:?}",
+                &out[..2]
+            );
+        };
+        pipeline.render(&mut out); // prime
+        controls.set_source_channels(SourceChannels::Center);
+        check(&mut pipeline, &mut out, 0.3, 0.3);
+        controls.set_source_channels(SourceChannels::Rear);
+        check(&mut pipeline, &mut out, 0.5, 0.6);
+        controls.set_source_channels(SourceChannels::Side);
+        check(&mut pipeline, &mut out, 0.7, 0.8);
+        controls.set_source_channels(SourceChannels::Lfe);
+        check(&mut pipeline, &mut out, 0.4, 0.4);
+        controls.set_source_channels(SourceChannels::Downmix);
+        let k = std::f32::consts::FRAC_1_SQRT_2;
+        let dl = (0.1 + k * (0.3 + 0.5 + 0.7)) * k;
+        let dr = (0.2 + k * (0.3 + 0.6 + 0.8)) * k;
+        check(&mut pipeline, &mut out, dl, dr);
     }
 
     #[test]

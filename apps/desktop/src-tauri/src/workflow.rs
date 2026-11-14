@@ -21,6 +21,9 @@ pub struct Workflow {
     ab: [Option<Profile>; 2],
     /// The A/B slot last recalled, until something else changes.
     active: Option<usize>,
+    /// The setup as of the last commit. A change is recorded *after* it lands
+    /// by pushing this baseline, so the UI never has to wait before changing.
+    baseline: Option<Profile>,
 }
 
 #[derive(Clone, Serialize)]
@@ -46,22 +49,36 @@ fn current(state: &AppState) -> CmdResult<Profile> {
     Profile::from_snapshot(STATE_NAME, &state.engine.snapshot())
 }
 
-/// Remembers the current setup before a change.
-pub fn checkpoint_state(state: &AppState) -> CmdResult<WorkflowStatus> {
+/// Records a change that just happened: the previous baseline goes on the
+/// undo stack and the current setup becomes the new baseline.
+pub fn commit_state(state: &AppState) -> CmdResult<WorkflowStatus> {
     let now = current(state)?;
     let mut wf = state.workflow.lock().unwrap();
-    if wf.undo.last() != Some(&now) {
-        wf.undo.push(now);
-        if wf.undo.len() > HISTORY_LIMIT {
-            wf.undo.remove(0);
+    match wf.baseline.take() {
+        Some(before) if before != now => {
+            wf.undo.push(before);
+            if wf.undo.len() > HISTORY_LIMIT {
+                wf.undo.remove(0);
+            }
+            wf.redo.clear();
+            wf.active = None;
         }
+        _ => {}
     }
-    wf.redo.clear();
-    wf.active = None;
+    wf.baseline = Some(now);
     Ok(wf.status())
 }
 
+/// Sets the baseline to the current setup without recording a step.
+fn rebase(state: &AppState) -> CmdResult<()> {
+    let now = current(state)?;
+    state.workflow.lock().unwrap().baseline = Some(now);
+    Ok(())
+}
+
 fn step(state: &AppState, back: bool) -> CmdResult<WorkflowStatus> {
+    // Anything changed outside the UI's normal path counts as one step first.
+    commit_state(state)?;
     let now = current(state)?;
     let target = {
         let mut wf = state.workflow.lock().unwrap();
@@ -83,6 +100,7 @@ fn step(state: &AppState, back: bool) -> CmdResult<WorkflowStatus> {
         target
     };
     apply_profile(&state.engine, &target)?;
+    rebase(state)?;
     Ok(state.workflow.lock().unwrap().status())
 }
 
@@ -94,8 +112,9 @@ pub fn recall_ab(state: &AppState, slot: usize) -> CmdResult<WorkflowStatus> {
             format!("Nothing is stored in {} yet", ["A", "B"][slot]),
         ));
     };
-    checkpoint_state(state)?;
+    commit_state(state)?;
     apply_profile(&state.engine, &profile)?;
+    commit_state(state)?;
     let mut wf = state.workflow.lock().unwrap();
     wf.active = Some(slot);
     Ok(wf.status())
@@ -110,12 +129,17 @@ fn slot_index(slot: u8) -> CmdResult<usize> {
 
 #[tauri::command]
 pub async fn workflow_status(state: State<'_, AppState>) -> CmdResult<WorkflowStatus> {
+    // The first poll sets the baseline the first change is measured against.
+    if state.workflow.lock().unwrap().baseline.is_none() {
+        rebase(&state)?;
+    }
     Ok(state.workflow.lock().unwrap().status())
 }
 
+/// Called by the UI after each change it makes.
 #[tauri::command]
 pub async fn checkpoint(state: State<'_, AppState>) -> CmdResult<WorkflowStatus> {
-    checkpoint_state(&state)
+    commit_state(&state)
 }
 
 #[tauri::command]
@@ -174,8 +198,10 @@ pub async fn import_settings(
         return Err(CommandError::new("invalid_profile", "File is too large"));
     }
     let profile = Profile::from_json(&text)?;
-    checkpoint_state(&state)?;
-    apply_profile(&state.engine, &profile)
+    commit_state(&state)?;
+    let report = apply_profile(&state.engine, &profile)?;
+    commit_state(&state)?;
+    Ok(report)
 }
 
 // --- Global hotkeys -------------------------------------------------------
@@ -230,6 +256,7 @@ pub fn hotkey_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 fn run_hotkey(state: &AppState, key: Hotkey) -> CmdResult<()> {
     match key {
         Hotkey::ToggleRouting => {
+            // Start/stop is not a setup change: nothing to record.
             if state.engine.snapshot().running {
                 state.engine.stop().map_err(engine_error)
             } else {
@@ -245,11 +272,12 @@ fn run_hotkey(state: &AppState, key: Hotkey) -> CmdResult<()> {
                 .iter()
                 .position(|m| *m == now)
                 .map_or(modes[0], |i| modes[(i + 1) % modes.len()]);
-            checkpoint_state(state)?;
+            commit_state(state)?;
             state
                 .engine
                 .apply_listening_mode(next)
-                .map_err(engine_error)
+                .map_err(engine_error)?;
+            commit_state(state).map(|_| ())
         }
         Hotkey::Undo => step(state, true).map(|_| ()),
     }

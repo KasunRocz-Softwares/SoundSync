@@ -3,7 +3,7 @@ import type {
   AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpatialConfig,
   SpeakerPosition, StereoSpread, EqSettings, AudioApp, Microphone, CalibrationReport,
   RoomReport, AppSettings, VirtualSpeakerStatus, SoundSettings, ListeningMode, AppMode, OutputSpectrum,
-  WorkflowStatus, HotkeyStatus,
+  WorkflowStatus, HotkeyStatus, SourceChannels,
 } from './types';
 
 export function errorMessage(error: unknown): string {
@@ -44,6 +44,10 @@ export const api = {
   subwoofer: (id: string, on: boolean) => invoke<void>('set_device_subwoofer', { id, on }),
   eq: (id: string, eq: EqSettings) => invoke<void>('set_device_eq', { id, eq }),
   sound: (settings: SoundSettings) => invoke<void>('set_sound', { settings }),
+  audioFormat: (sampleRate: number, channels: number) => invoke<void>('set_audio_format', { sampleRate, channels }),
+  advanced: (id: string, a: { source_channels: SourceChannels; convolution: string | null; exclusive: boolean }) =>
+    invoke<void>('set_device_advanced', { id, sourceChannels: a.source_channels, convolution: a.convolution, exclusive: a.exclusive }),
+  pickImpulseResponse: () => invoke<string | null>('pick_impulse_response'),
   listeningMode: (mode: ListeningMode) => invoke<void>('apply_listening_mode', { mode }),
   appModes: (modes: AppMode[]) => invoke<void>('set_app_modes', { modes }),
   spectrum: () => invoke<OutputSpectrum[]>('get_spectrum'),

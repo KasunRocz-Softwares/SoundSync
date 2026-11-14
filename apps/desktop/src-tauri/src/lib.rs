@@ -42,9 +42,13 @@ pub(crate) fn apply_profile(
 ) -> CmdResult<ProfileLoadReport> {
     let endpoints = engine.refresh_endpoints().map_err(engine_error)?;
     let plan = profile.plan_apply(&endpoints);
-    let current = engine.snapshot();
-    // Mode and source changes restart audio: only send them when they differ, so
-    // undo and A/B switches are seamless.
+    let mut current = engine.snapshot();
+    // Format, mode and source changes restart audio: only send them when they
+    // differ, so undo and A/B switches are seamless.
+    if current.capture_format != plan.format {
+        engine.set_format(plan.format).map_err(engine_error)?;
+        current = engine.snapshot();
+    }
     if current.mode != plan.mode {
         engine.set_mode(plan.mode).map_err(engine_error)?;
     }
@@ -446,6 +450,74 @@ async fn set_device_eq(id: String, eq: EqSettings, state: State<'_, AppState>) -
     state.engine.set_eq(id, eq).map_err(engine_error)
 }
 
+/// Capture sample rate and channel count. Restarts routing if it is running.
+#[tauri::command]
+async fn set_audio_format(
+    sample_rate: u32,
+    channels: u16,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    syncsound_engine::profile::validate_format(sample_rate, channels)?;
+    state
+        .engine
+        .set_format(syncsound_engine::PcmFormat {
+            sample_rate,
+            channels,
+        })
+        .map_err(engine_error)
+}
+
+/// Source channels, FIR impulse response and exclusive mode for one output.
+#[tauri::command]
+async fn set_device_advanced(
+    id: String,
+    source_channels: syncsound_engine::render::SourceChannels,
+    convolution: Option<String>,
+    exclusive: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    let snapshot = state.engine.snapshot();
+    validate_endpoint_id(&id, &snapshot.endpoints)?;
+    if let Some(path) = &convolution {
+        let p = std::path::Path::new(path);
+        let is_wav = p
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("wav"));
+        if path.len() > 1024 || !p.is_absolute() || !is_wav || !p.is_file() {
+            return Err(CommandError::new(
+                "invalid_convolution",
+                "Choose an existing .wav impulse-response file",
+            ));
+        }
+    }
+    state
+        .engine
+        .set_output_advanced(
+            id,
+            syncsound_engine::routing::OutputAdvanced {
+                source_channels,
+                convolution,
+                exclusive,
+            },
+        )
+        .map_err(engine_error)
+}
+
+/// Opens a file picker for an impulse-response WAV; None if cancelled.
+#[tauri::command]
+async fn pick_impulse_response(app: tauri::AppHandle) -> CmdResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Choose an impulse response (WAV)")
+        .add_filter("Impulse response", &["wav"])
+        .blocking_pick_file();
+    Ok(picked
+        .and_then(|f| f.into_path().ok())
+        .map(|p| p.display().to_string()))
+}
+
 #[tauri::command]
 async fn set_sound(
     settings: syncsound_engine::enhance::SoundSettings,
@@ -607,6 +679,7 @@ pub fn run() {
         // Signed auto-update from GitHub Releases (public key in tauri.conf.json).
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         // Start with Windows (toggled from the UI); launched hidden in the tray.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -685,6 +758,9 @@ pub fn run() {
             set_spatial,
             set_device_eq,
             set_sound,
+            set_audio_format,
+            set_device_advanced,
+            pick_impulse_response,
             apply_listening_mode,
             set_app_modes,
             get_spectrum,

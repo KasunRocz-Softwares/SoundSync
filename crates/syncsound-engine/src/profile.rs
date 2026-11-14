@@ -65,6 +65,39 @@ pub struct ProfileOutput {
     pub subwoofer: bool,
     #[serde(default)]
     pub eq: EqSettings,
+    #[serde(default)]
+    pub source_channels: crate::render::SourceChannels,
+    #[serde(default)]
+    pub convolution: Option<String>,
+    #[serde(default)]
+    pub exclusive: bool,
+}
+
+/// Capture rates and channel counts the engine supports.
+pub const SAMPLE_RATES: [u32; 3] = [44_100, 48_000, 96_000];
+pub const CHANNEL_COUNTS: [u16; 3] = [2, 6, 8];
+
+pub fn validate_format(sample_rate: u32, channels: u16) -> Result<(), CommandError> {
+    if !SAMPLE_RATES.contains(&sample_rate) {
+        return Err(CommandError::new(
+            "invalid_format",
+            "Sample rate must be 44.1, 48 or 96 kHz",
+        ));
+    }
+    if !CHANNEL_COUNTS.contains(&channels) {
+        return Err(CommandError::new(
+            "invalid_format",
+            "Channels must be stereo, 5.1 or 7.1",
+        ));
+    }
+    Ok(())
+}
+
+fn default_rate() -> u32 {
+    48_000
+}
+fn default_channels() -> u16 {
+    2
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -83,6 +116,10 @@ pub struct Profile {
     pub sound: SoundSettings,
     #[serde(default)]
     pub app_modes: Vec<AppMode>,
+    #[serde(default = "default_rate")]
+    pub sample_rate: u32,
+    #[serde(default = "default_channels")]
+    pub channels: u16,
 }
 
 impl ProfileOutput {
@@ -104,6 +141,9 @@ impl ProfileOutput {
             spread: StereoSpread::Point,
             subwoofer: false,
             eq: EqSettings::default(),
+            source_channels: Default::default(),
+            convolution: None,
+            exclusive: false,
         }
     }
 }
@@ -135,6 +175,7 @@ pub struct ProfileApplyPlan {
     pub spatial: SpatialConfig,
     pub sound: SoundSettings,
     pub app_modes: Vec<AppMode>,
+    pub format: crate::PcmFormat,
 }
 
 pub fn validate_name(name: &str) -> Result<(), CommandError> {
@@ -182,12 +223,17 @@ impl Profile {
                     spread: o.config.spread,
                     subwoofer: o.config.subwoofer,
                     eq: o.config.eq,
+                    source_channels: o.config.source_channels,
+                    convolution: o.config.convolution.clone(),
+                    exclusive: o.config.exclusive,
                 })
                 .collect(),
             distance_compensation: snapshot.distance_compensation,
             spatial: snapshot.spatial,
             sound: snapshot.sound,
             app_modes: snapshot.app_modes.clone(),
+            sample_rate: snapshot.capture_format.sample_rate,
+            channels: snapshot.capture_format.channels,
         };
         profile.validate()?;
         Ok(profile)
@@ -204,6 +250,7 @@ impl Profile {
         validate_spatial(&self.spatial)?;
         self.sound.validate()?;
         validate_app_modes(&self.app_modes)?;
+        validate_format(self.sample_rate, self.channels)?;
         if self.outputs.len() > MAX_PROFILE_OUTPUTS {
             return Err(CommandError::new(
                 "invalid_profile",
@@ -308,6 +355,9 @@ impl Profile {
                     spread: output.spread,
                     subwoofer: output.subwoofer,
                     eq: output.eq,
+                    source_channels: output.source_channels,
+                    convolution: output.convolution.clone(),
+                    exclusive: output.exclusive,
                 });
             } else {
                 missing.push(MissingOutput {
@@ -327,6 +377,10 @@ impl Profile {
             spatial: self.spatial,
             sound: self.sound,
             app_modes: self.app_modes.clone(),
+            format: crate::PcmFormat {
+                sample_rate: self.sample_rate,
+                channels: self.channels,
+            },
         }
     }
 
@@ -456,6 +510,8 @@ mod tests {
             spatial: SpatialConfig::default(),
             sound: SoundSettings::default(),
             app_modes: Vec::new(),
+            sample_rate: 48_000,
+            channels: 2,
             outputs: vec![
                 ProfileOutput {
                     endpoint_id: "id-a".into(),

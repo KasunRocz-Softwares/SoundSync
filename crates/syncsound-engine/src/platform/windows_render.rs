@@ -59,12 +59,15 @@ impl Drop for EventHandle {
 }
 
 impl RenderWorker {
+    /// `format` is the render format (always stereo). `exclusive` asks for
+    /// WASAPI exclusive mode, falling back to shared if the device refuses.
     pub fn spawn(
         endpoint_id: String,
         pipeline: RenderPipeline,
         format: PcmFormat,
         buffer_hns: i64,
         metrics: Arc<OutputMetrics>,
+        exclusive: bool,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let status = Arc::new(WorkerStatus {
@@ -85,6 +88,7 @@ impl RenderWorker {
                         &metrics,
                         &stop,
                         &status,
+                        exclusive,
                     );
                     match result {
                         Ok(()) => status.state.store(STOPPED, Ordering::Release),
@@ -187,6 +191,105 @@ unsafe fn integer_mix_format(
     }
 }
 
+const KSDATAFORMAT_SUBTYPE_PCM: windows::core::GUID =
+    windows::core::GUID::from_u128(0x00000001_0000_0010_8000_00aa00389b71);
+const KSDATAFORMAT_SUBTYPE_IEEE_FLOAT: windows::core::GUID =
+    windows::core::GUID::from_u128(0x00000003_0000_0010_8000_00aa00389b71);
+
+/// Stereo WAVEFORMATEXTENSIBLE for an exclusive-mode candidate format.
+fn extensible(format: PcmFormat, sample: DeviceSampleFormat, valid_bits: u16) -> WAVEFORMATEXTENSIBLE {
+    let bits = (sample.bytes_per_sample() * 8) as u16;
+    let block = format.channels * bits / 8;
+    WAVEFORMATEXTENSIBLE {
+        Format: WAVEFORMATEX {
+            wFormatTag: WAVE_FORMAT_EXTENSIBLE as u16,
+            nChannels: format.channels,
+            nSamplesPerSec: format.sample_rate,
+            nAvgBytesPerSec: format.sample_rate * u32::from(block),
+            nBlockAlign: block,
+            wBitsPerSample: bits,
+            cbSize: (std::mem::size_of::<WAVEFORMATEXTENSIBLE>() - std::mem::size_of::<WAVEFORMATEX>())
+                as u16,
+        },
+        Samples: WAVEFORMATEXTENSIBLE_0 {
+            wValidBitsPerSample: valid_bits,
+        },
+        dwChannelMask: 0x3, // front left + front right
+        SubFormat: if sample == DeviceSampleFormat::F32 {
+            KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+        } else {
+            KSDATAFORMAT_SUBTYPE_PCM
+        },
+    }
+}
+
+/// Opens the device in exclusive mode with the first format it accepts at the
+/// engine's rate. Returns the client and the sample container to encode.
+unsafe fn open_exclusive(
+    device: &IMMDevice,
+    format: PcmFormat,
+) -> Result<(IAudioClient, DeviceSampleFormat), CaptureError> {
+    let candidates = [
+        (DeviceSampleFormat::F32, 32),
+        (DeviceSampleFormat::I32, 32),
+        (DeviceSampleFormat::I32, 24),
+        (DeviceSampleFormat::I24, 24),
+        (DeviceSampleFormat::I16, 16),
+    ];
+    let probe: IAudioClient = unsafe { device.Activate(CLSCTX_ALL, None)? };
+    let Some((sample, wave)) = candidates.iter().find_map(|(sample, valid)| {
+        let wave = extensible(format, *sample, *valid);
+        let hr = unsafe {
+            probe.IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, &wave.Format, None)
+        };
+        (hr == windows::Win32::Foundation::S_OK).then_some((*sample, wave))
+    }) else {
+        return Err(CaptureError::Windows(windows::core::Error::from_hresult(
+            AUDCLNT_E_UNSUPPORTED_FORMAT,
+        )));
+    };
+    let mut period = 0i64;
+    unsafe { probe.GetDevicePeriod(Some(&mut period), None)? };
+    drop(probe);
+    let init = |period: i64| -> windows::core::Result<IAudioClient> {
+        let client: IAudioClient = unsafe { device.Activate(CLSCTX_ALL, None)? };
+        unsafe {
+            client.Initialize(
+                AUDCLNT_SHAREMODE_EXCLUSIVE,
+                AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                period,
+                period,
+                &wave.Format,
+                None,
+            )?;
+        }
+        Ok(client)
+    };
+    match init(period) {
+        Ok(client) => Ok((client, sample)),
+        Err(error) if error.code() == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED => {
+            // Retry with the period the device rounds its buffer to.
+            let client: IAudioClient = unsafe { device.Activate(CLSCTX_ALL, None)? };
+            let _ = unsafe {
+                client.Initialize(
+                    AUDCLNT_SHAREMODE_EXCLUSIVE,
+                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                    period,
+                    period,
+                    &wave.Format,
+                    None,
+                )
+            };
+            let frames = unsafe { client.GetBufferSize()? };
+            let aligned = (10_000_000.0 * f64::from(frames) / f64::from(format.sample_rate)
+                + 0.5) as i64;
+            Ok((init(aligned)?, sample))
+        }
+        Err(error) => Err(CaptureError::Windows(error)),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run(
     endpoint_id: &str,
     mut pipeline: RenderPipeline,
@@ -195,6 +298,7 @@ fn run(
     metrics: &OutputMetrics,
     stop: &AtomicBool,
     status: &WorkerStatus,
+    exclusive: bool,
 ) -> Result<(), CaptureError> {
     let _apartment = Apartment::new()?;
     unsafe {
@@ -202,6 +306,18 @@ fn run(
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
         let wide: Vec<u16> = endpoint_id.encode_utf16().chain(Some(0)).collect();
         let device = enumerator.GetDevice(PCWSTR(wide.as_ptr()))?;
+
+        // Exclusive mode first when asked; if the device refuses (in use, no
+        // matching format, Bluetooth…), fall back to shared mode below.
+        let exclusive_client = if exclusive {
+            open_exclusive(&device, format).ok()
+        } else {
+            None
+        };
+        metrics
+            .exclusive_active
+            .store(exclusive_client.is_some(), Ordering::Relaxed);
+        let is_exclusive = exclusive_client.is_some();
         let client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
 
         // Prefer float32 in the source layout and let the shared engine convert rate,
@@ -210,7 +326,11 @@ fn run(
         let event_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
         let wave = float_wave(format);
         let mut sample_format = DeviceSampleFormat::F32;
-        let first = client.Initialize(
+        let first = if let Some((_, sample)) = &exclusive_client {
+            sample_format = *sample;
+            Ok(())
+        } else {
+            client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
             event_flags
                 | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
@@ -219,8 +339,11 @@ fn run(
             0,
             &wave,
             None,
-        );
-        let client = if let Err(error) = first {
+        )
+        };
+        let client = if let Some((exclusive, _)) = exclusive_client {
+            exclusive
+        } else if let Err(error) = first {
             // A failed Initialize leaves the client unusable; activate a fresh one.
             let client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
             let mix = ComMemory(client.GetMixFormat()?);
@@ -278,7 +401,12 @@ fn run(
                     continue;
                 }
                 timeouts = 0;
-                let padding = client.GetCurrentPadding()?;
+                // Exclusive event mode hands over the whole buffer on every event.
+                let padding = if is_exclusive {
+                    0
+                } else {
+                    client.GetCurrentPadding()?
+                };
                 metrics.set_device_padding(u64::from(padding));
                 let available = buffer_frames.saturating_sub(padding);
                 if available == 0 {

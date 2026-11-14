@@ -8,6 +8,7 @@ pub mod audio_format;
 pub mod calibration;
 pub mod capture;
 pub mod commands;
+pub mod convolve;
 pub mod diagnostics;
 pub mod dsp;
 pub mod enhance;

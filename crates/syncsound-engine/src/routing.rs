@@ -36,6 +36,23 @@ pub struct OutputConfig {
     pub subwoofer: bool,
     #[serde(default)]
     pub eq: EqSettings,
+    /// Which channels of a 5.1 / 7.1 source this output plays.
+    #[serde(default)]
+    pub source_channels: crate::render::SourceChannels,
+    /// Impulse-response WAV this output is convolved with (None = off).
+    #[serde(default)]
+    pub convolution: Option<String>,
+    /// Ask for WASAPI exclusive mode (lowest latency; locks the device).
+    #[serde(default)]
+    pub exclusive: bool,
+}
+
+/// Advanced per-output settings, changed together.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputAdvanced {
+    pub source_channels: crate::render::SourceChannels,
+    pub convolution: Option<String>,
+    pub exclusive: bool,
 }
 
 impl OutputConfig {
@@ -54,6 +71,9 @@ impl OutputConfig {
             spread: StereoSpread::Point,
             subwoofer: false,
             eq: EqSettings::default(),
+            source_channels: crate::render::SourceChannels::Downmix,
+            convolution: None,
+            exclusive: false,
         }
     }
 }
@@ -88,6 +108,14 @@ pub struct OutputStatus {
     #[serde(default)]
     pub bluetooth: bool,
     pub warning: Option<String>,
+    /// The device is open in WASAPI exclusive mode right now.
+    #[serde(default)]
+    pub exclusive_active: bool,
+    /// Taps of the loaded impulse response, or why it could not be loaded.
+    #[serde(default)]
+    pub convolution_taps: Option<usize>,
+    #[serde(default)]
+    pub convolution_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

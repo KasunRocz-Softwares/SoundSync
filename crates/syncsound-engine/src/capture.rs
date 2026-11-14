@@ -220,6 +220,9 @@ pub struct PacketPublisher {
     max_frames: usize,
     timeline: MasterTimeline,
     next: Option<(u64, u64)>,
+    /// QPC-derived frame minus the contiguous frame, last packet. Follows slow
+    /// clock drift; a sudden change means audio went missing.
+    qpc_offset: Option<i64>,
 }
 
 impl PacketPublisher {
@@ -249,6 +252,7 @@ impl PacketPublisher {
                 max_frames: config.max_block_frames,
                 timeline: MasterTimeline::new(config.format.sample_rate, 10_000_000, 0, 0).unwrap(),
                 next: None,
+                qpc_offset: None,
             },
             consumer,
         ))
@@ -257,6 +261,7 @@ impl PacketPublisher {
     pub fn reset(&mut self) {
         self.producer.reset();
         self.next = None;
+        self.qpc_offset = None;
     }
 
     pub fn publish(&mut self, packet: Packet<'_>) -> QueueStatus {
@@ -273,17 +278,24 @@ impl PacketPublisher {
             self.reset();
             return QueueStatus::InvalidFormat;
         }
-        if packet.discontinuity
-            || self
-                .next
-                .is_some_and(|(position, _)| position != packet.device_position)
-        {
+        // Continuity is judged on the capture timestamp, not device_position:
+        // when Windows resamples (capture rate ≠ the device's mix rate),
+        // device_position counts mix-rate frames and never lines up with the
+        // frames delivered. A jump of more than 50 ms against the drift-tracked
+        // offset means audio was lost.
+        let qpc_frame = self.timeline.frame_at(packet.qpc_100ns);
+        let tolerance = i64::from(self.format.sample_rate / 20);
+        let jumped = match (self.next, self.qpc_offset) {
+            (Some((_, expected)), Some(previous)) => {
+                (qpc_frame as i64 - expected as i64 - previous).abs() > tolerance
+            }
+            _ => false,
+        };
+        if packet.discontinuity || jumped {
             self.reset();
         }
-        let first = self
-            .next
-            .map(|(_, frame)| frame)
-            .unwrap_or_else(|| self.timeline.frame_at(packet.qpc_100ns));
+        let first = self.next.map(|(_, frame)| frame).unwrap_or(qpc_frame);
+        self.qpc_offset = Some(qpc_frame as i64 - first as i64);
         let Some(next_frame) = first.checked_add(packet.frames as u64) else {
             self.reset();
             return QueueStatus::InvalidFormat;

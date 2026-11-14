@@ -81,6 +81,17 @@ Spatial mode changes only what each speaker plays. Delay, gain, level and alignm
   - **Even out volume:** slow automatic level, up to ±12 dB.
   - **Night mode:** compression that lifts dialogue and holds back explosions.
   - **Match speaker levels:** Calibrate delays also measures each speaker's level at your seat and turns the louder ones down.
+- **Pro options** (Routing tab):
+  - **Engine format:** 44.1, 48 or 96 kHz, and stereo, 5.1 or 7.1 capture.
+  - **Per output, under Advanced:**
+    - which source channels it plays: downmix, front, centre, LFE, side or rear
+    - an FIR impulse response (WAV from REW, rePhase…), convolved with zero added latency
+    - WASAPI exclusive mode, falling back to shared mode if the device refuses
+- **Workflow:**
+  - **Undo / redo:** Ctrl+Z / Ctrl+Y for any change.
+  - **A/B snapshots:** compare two setups with seamless switching.
+  - **Settings files:** export to a file and import it on another PC (Settings tab).
+  - **Global hotkeys:** Ctrl+Alt+S routing, Ctrl+Alt+A / Ctrl+Alt+B to compare, Ctrl+Alt+L listening mode, Ctrl+Alt+Z undo.
 - **Equalizer:** per output, low cut (40–150 Hz) for small speakers, bass (100 Hz), mid (1 kHz) and treble (8 kHz), plus a 10-band graphic EQ (31.5 Hz–16 kHz), each ±12 dB, with presets and a response curve. Room correction aims for a **Warm** (default) or **Flat** target; switching target re-aims the last measurement without measuring again. Boosts lower the level by the same amount so they can't clip.
 
 ## Requirements (Windows 11 x64)

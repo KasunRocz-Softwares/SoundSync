@@ -87,6 +87,8 @@ enum Command {
     ApplyListeningMode(ListeningMode, Reply<()>),
     SetAppModes(Vec<AppMode>, Reply<()>),
     Spectrum(Reply<Vec<OutputSpectrum>>),
+    SetFormat(PcmFormat, Reply<()>),
+    SetOutputAdvanced(String, crate::routing::OutputAdvanced, Reply<()>),
     ListApps(Reply<Vec<AudioApp>>),
     ListMics(Reply<Vec<Microphone>>),
     Calibrate(String, Reply<CalibrationReport>),
@@ -265,6 +267,22 @@ impl AudioEngine {
     pub fn spectrum(&self) -> Result<Vec<OutputSpectrum>, EngineError> {
         self.call(Command::Spectrum)
     }
+    /// Capture sample rate and channel count (validated by the caller).
+    /// Restarts routing if it is running.
+    pub fn set_format(&self, format: PcmFormat) -> Result<(), EngineError> {
+        self.call_timeout(|r| Command::SetFormat(format, r), Duration::from_secs(20))
+    }
+    /// Source channels, impulse response and exclusive mode for one output.
+    pub fn set_output_advanced(
+        &self,
+        id: String,
+        advanced: crate::routing::OutputAdvanced,
+    ) -> Result<(), EngineError> {
+        self.call_timeout(
+            |r| Command::SetOutputAdvanced(id, advanced, r),
+            Duration::from_secs(20),
+        )
+    }
     pub fn set_distance_compensation(&self, enabled: bool) -> Result<(), EngineError> {
         self.call(|r| Command::SetCompensation(enabled, r))
     }
@@ -293,6 +311,8 @@ struct OutputSlot {
     worker: Option<RenderWorker>,
     published_eq: Option<EqSettings>,
     published_enhance: Option<(EqSettings, SoundSettings)>,
+    /// Last impulse-response load: taps, or the error to show.
+    convolution: Option<Result<usize, String>>,
 }
 
 struct CalibrationRun {
@@ -482,6 +502,7 @@ impl Core {
                     worker: None,
                     published_eq: None,
                     published_enhance: None,
+                    convolution: None,
                 },
             );
         }
@@ -626,6 +647,30 @@ impl Core {
                 self.sound = settings;
                 let _ = reply.send(Ok(()));
             }
+            Command::SetFormat(format, reply) => {
+                let _ = reply.send(self.set_format(format));
+            }
+            Command::SetOutputAdvanced(id, advanced, reply) => {
+                let running = self.running;
+                let result = self.slot(&id).map(|slot| {
+                    let reopen = slot.config.exclusive != advanced.exclusive;
+                    let reload = slot.config.convolution != advanced.convolution;
+                    slot.config.source_channels = advanced.source_channels;
+                    slot.config.exclusive = advanced.exclusive;
+                    slot.config.convolution = advanced.convolution;
+                    (reopen && running && slot.config.enabled, reload)
+                });
+                if let Ok((reopen, reload)) = result {
+                    if reopen {
+                        // Exclusive vs shared is fixed when the device opens.
+                        self.stop_output(&id);
+                        self.start_output(&id);
+                    } else if reload {
+                        self.load_convolver(&id);
+                    }
+                }
+                let _ = reply.send(result.map(|_| ()));
+            }
             Command::ApplyListeningMode(mode, reply) => {
                 self.sound = mode.apply(self.sound);
                 let _ = reply.send(Ok(()));
@@ -675,6 +720,42 @@ impl Core {
                 let _ = reply.send(Ok(self.endpoints.clone()));
             }
             Command::Shutdown => {}
+        }
+    }
+
+    /// Switches the capture rate / channel count. Everything rate-dependent is
+    /// rebuilt; routing restarts if it was running.
+    fn set_format(&mut self, format: PcmFormat) -> Result<(), EngineError> {
+        if format == self.format {
+            return Ok(());
+        }
+        if self.calibration.is_some() {
+            return Err(EngineError::Platform(
+                "Wait for the calibration to finish".into(),
+            ));
+        }
+        let was_running = self.running;
+        self.stop_all();
+        self.format = format;
+        let ch = usize::from(format.channels);
+        self.mixer = TimelineMixer::new(ch, 24_000, 960);
+        self.mix_out = vec![0.0; 480 * ch];
+        self.click_block = vec![0.0; 480 * ch];
+        self.silent_block = vec![0.0; 480 * ch];
+        self.scratch = vec![0.0; CaptureConfig::default().max_block_frames * ch];
+        let policy = self.mode.policy();
+        for slot in self.outputs.values_mut() {
+            slot.published_eq = None;
+            slot.published_enhance = None;
+            slot.controls
+                .set_delay_frames(ms_to_frames(slot.config.delay_ms, format.sample_rate));
+            slot.controls.apply_policy(policy, format.sample_rate);
+        }
+        self.recompute_placement();
+        if was_running {
+            self.start()
+        } else {
+            Ok(())
         }
     }
 
@@ -738,6 +819,8 @@ impl Core {
         let sound = self.effective_sound();
         for (slot, placement) in self.outputs.values_mut().zip(placements) {
             slot.controls.set_role(slot.config.role);
+            slot.controls
+                .set_source_channels(slot.config.source_channels);
             if slot.published_eq != Some(slot.config.eq) {
                 slot.controls
                     .eq
@@ -1002,13 +1085,47 @@ impl Core {
             }
         };
         slot.producer = Some(producer);
+        let render_format = PcmFormat {
+            sample_rate: format.sample_rate,
+            channels: crate::render::OUTPUT_CHANNELS as u16,
+        };
+        let exclusive = slot.config.exclusive;
         slot.worker = Some(RenderWorker::spawn(
             id.into(),
             pipeline,
-            format,
+            render_format,
             policy.render_buffer_hns,
             slot.metrics.clone(),
+            exclusive,
         ));
+        // A new pipeline starts without a convolver: hand it one again.
+        self.load_convolver(id);
+    }
+
+    /// Loads this output's impulse response (if any) and hands it to its render thread.
+    fn load_convolver(&mut self, id: &str) {
+        let rate = self.format.sample_rate;
+        let Some(slot) = self.outputs.get_mut(id) else {
+            return;
+        };
+        let Some(path) = slot.config.convolution.clone() else {
+            slot.controls.convolver.offer(None);
+            slot.convolution = None;
+            return;
+        };
+        let loaded = crate::convolve::load_impulse_response(std::path::Path::new(&path), rate)
+            .and_then(|(l, r)| crate::convolve::StereoConvolver::new(&l, &r));
+        match loaded {
+            Ok(conv) => {
+                slot.convolution = Some(Ok(conv.taps));
+                slot.controls.convolver.offer(Some(conv));
+            }
+            Err(error) => {
+                slot.convolution = Some(Err(error.clone()));
+                slot.controls.convolver.offer(None);
+                self.record("convolution", error);
+            }
+        }
     }
 
     fn stop_output(&mut self, id: &str) {
@@ -1048,6 +1165,10 @@ impl Core {
             self.refresh_endpoints();
         }
         self.service_spectrum();
+        // Free convolvers the render threads have swapped out.
+        for slot in self.outputs.values() {
+            slot.controls.convolver.collect();
+        }
         if self.running {
             self.service_app_modes();
         }
@@ -1530,6 +1651,10 @@ impl Core {
                         None
                     },
                     metrics,
+                    exclusive_active: running
+                        && slot.metrics.exclusive_active.load(Ordering::Relaxed),
+                    convolution_taps: slot.convolution.as_ref().and_then(|r| r.as_ref().ok().copied()),
+                    convolution_error: slot.convolution.as_ref().and_then(|r| r.as_ref().err().cloned()),
                 }
             })
             .collect();

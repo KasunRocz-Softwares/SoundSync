@@ -40,7 +40,13 @@ export type OutputConfig = {
   endpoint_id: string; enabled: boolean; gain: number; muted: boolean; delay_ms: number;
   role: ChannelRole; position: SpeakerPosition; distance_m: number | null; trim_db: number;
   azimuth_deg: number | null; spread: StereoSpread; subwoofer: boolean; eq: EqSettings;
+  source_channels: SourceChannels; convolution: string | null; exclusive: boolean;
 };
+export type SourceChannels = 'downmix' | 'front' | 'center' | 'lfe' | 'side' | 'rear';
+export const SAMPLE_RATES = [44100, 48000, 96000];
+export const CHANNEL_COUNTS: { value: number; label: string }[] = [
+  { value: 2, label: 'Stereo' }, { value: 6, label: '5.1' }, { value: 8, label: '7.1' },
+];
 
 export type EqSettings = {
   enabled: boolean; low_cut_hz: number; bass_db: number; mid_db: number; treble_db: number;
@@ -110,6 +116,9 @@ export type OutputStatus = {
   metrics: OutputMetrics;
   bluetooth: boolean;
   warning: string | null;
+  exclusive_active: boolean;
+  convolution_taps: number | null;
+  convolution_error: string | null;
 };
 
 export type ErrorRecord = { at_ms: number; scope: string; message: string };

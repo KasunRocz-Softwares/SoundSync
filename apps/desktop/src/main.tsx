@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, AlertTriangle, AppWindow, AudioLines, Settings, SlidersHorizontal, Speaker, Download, FolderOpen, Headphones, Play, Power, Redo2, RefreshCw, Save, Undo2, Volume2, VolumeX,
+  Activity, AlertTriangle, AppWindow, AudioLines, Cpu, Settings, SlidersHorizontal, Speaker, Download, FolderOpen, Headphones, Play, Power, Redo2, RefreshCw, Save, Undo2, Volume2, VolumeX,
 } from 'lucide-react';
 import { api, errorMessage, type SourceKind } from './api';
 import {
   MAX_DELAY_MS, MAX_DISTANCE_M, MAX_ENABLED_OUTPUTS, MIN_DISTANCE_M, MIN_TRIM_DB,
   type AudioEndpoint, type AudioMode, type CaptureSource, type CaptureState, type ChannelRole, type EngineSnapshot,
   type LifecycleState, type OutputStatus, type ProfileLoadReport, type SoundPreset, type SpeakerPosition,
-  type WorkflowStatus,
+  type WorkflowStatus, type SourceChannels, SAMPLE_RATES, CHANNEL_COUNTS,
 } from './types';
 import { RoomMap } from './RoomMap';
 import { AppsPanel } from './AppsPanel';
@@ -145,8 +145,55 @@ function NumberField({ value, min, max, step, allowEmpty, label, width, onCommit
 
 function fmt(n: number, digits = 0) { return Number.isFinite(n) ? n.toFixed(digits) : '—'; }
 
-function OutputCard({ endpoint, status, running, enabledCount, onAction }: {
-  endpoint: AudioEndpoint; status?: OutputStatus; running: boolean; enabledCount: number;
+const SOURCE_MAPS: { id: SourceChannels; label: string }[] = [
+  { id: 'downmix', label: 'Downmix of all channels' }, { id: 'front', label: 'Front left / right' },
+  { id: 'center', label: 'Centre' }, { id: 'lfe', label: 'LFE (subwoofer channel)' },
+  { id: 'side', label: 'Side left / right' }, { id: 'rear', label: 'Rear left / right' },
+];
+
+/** Pro options: which source channels to play, FIR convolution, exclusive mode. */
+function AdvancedOutput({ endpoint, status, sourceChannels, onAction }: {
+  endpoint: AudioEndpoint; status: OutputStatus; sourceChannels: number;
+  onAction: (fn: () => Promise<unknown>) => void;
+}) {
+  const c = status.config;
+  const set = (patch: Partial<{ source_channels: SourceChannels; convolution: string | null; exclusive: boolean }>) =>
+    onAction(() => api.advanced(endpoint.id, { source_channels: c.source_channels, convolution: c.convolution, exclusive: c.exclusive, ...patch }));
+  const pick = () => api.pickImpulseResponse().then(path => { if (path) set({ convolution: path }); });
+  const irName = c.convolution?.split(/[\\/]/).pop();
+  // Opens by itself if something advanced is set; then stays as the user leaves it.
+  const [open, setOpen] = useState(c.exclusive || !!c.convolution || c.source_channels !== 'downmix');
+  return <details className="advanced" open={open} onToggle={e => setOpen((e.target as HTMLDetailsElement).open)}>
+    <summary><Cpu size={14} /> Advanced</summary>
+    <div className="advanced-grid">
+      {sourceChannels > 2 && <label>Source channels
+        <select value={c.source_channels} aria-label="Source channels this output plays"
+          onChange={e => set({ source_channels: e.target.value as SourceChannels })}>
+          {SOURCE_MAPS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+        </select>
+      </label>}
+      <label className="check">
+        <input type="checkbox" checked={c.exclusive} onChange={e => set({ exclusive: e.target.checked })} />
+        Exclusive mode
+        <span className="muted">{!c.exclusive ? 'lowest latency; other apps can\'t use this device meanwhile'
+          : !status.state || status.state !== 'running' ? 'applies while routing'
+          : status.exclusive_active ? 'active' : 'refused by the device, using shared mode'}</span>
+      </label>
+      <div className="fir">
+        <span>FIR filter</span>
+        {c.convolution
+          ? <><span className="ir-name" title={c.convolution}>{irName}</span>
+            <button onClick={pick}>Change…</button><button onClick={() => set({ convolution: null })}>Remove</button></>
+          : <button onClick={pick}>Load impulse response…</button>}
+        {status.convolution_taps != null && <span className="muted">{status.convolution_taps.toLocaleString()} taps, no added latency</span>}
+        {status.convolution_error && <span className="field-error">{status.convolution_error}</span>}
+      </div>
+    </div>
+  </details>;
+}
+
+function OutputCard({ endpoint, status, running, enabledCount, sourceChannels, onAction }: {
+  endpoint: AudioEndpoint; status?: OutputStatus; running: boolean; enabledCount: number; sourceChannels: number;
   onAction: (fn: () => Promise<unknown>) => void;
 }) {
   const config = status?.config;
@@ -206,6 +253,7 @@ function OutputCard({ endpoint, status, running, enabledCount, onAction }: {
         Placement: +{fmt(status.placement_delay_ms, 1)} ms, {Math.round(status.placement_level * 100)}% level
       </span>}
     </div>}
+    {enabled && status && <AdvancedOutput endpoint={endpoint} status={status} sourceChannels={sourceChannels} onAction={onAction} />}
     {showMetrics && status && <dl className="metrics">
       <div><dt>Buffered</dt><dd>{fmt(status.buffered_ms)} ms</dd></div>
       <div><dt>Est. latency</dt><dd>{fmt(status.estimated_latency_ms)} ms</dd></div>
@@ -243,10 +291,14 @@ function App() {
   const poll = useCallback(async () => {
     try { setSnapshot(await api.status()); setWorkflow(await api.workflow()); } catch (e) { setError(errorMessage(e)); }
   }, []);
-  /** Every change goes through here: remember the setup first, so it can be undone. */
+  /** Every change goes through here. `fn` runs at once (handlers may read the
+   *  event target), then the change is committed to the undo history. */
   const act = useCallback((fn: () => Promise<unknown>) => {
     setError('');
-    api.checkpoint().catch(() => undefined).then(fn).then(poll, e => { setError(errorMessage(e)); void poll(); });
+    fn().then(
+      () => api.checkpoint().catch(() => undefined).then(poll),
+      e => { setError(errorMessage(e)); void poll(); },
+    );
   }, [poll]);
   /** Undo / redo / A-B: no checkpoint of their own (they manage history). */
   const step = useCallback((fn: () => Promise<WorkflowStatus>) => {
@@ -366,6 +418,21 @@ function App() {
               className={snapshot?.mode === m.id ? 'selected' : ''} onClick={() => act(() => api.mode(m.id))}>{m.label}</button>)}
           </div>
           <p className="hint">{MODES.find(m => m.id === snapshot?.mode)?.detail}</p>
+          {snapshot && <div className="format-row">
+            <label>Sample rate
+              <select value={snapshot.capture_format.sample_rate} aria-label="Capture sample rate"
+                onChange={e => act(() => api.audioFormat(Number(e.target.value), snapshot.capture_format.channels))}>
+                {SAMPLE_RATES.map(r => <option key={r} value={r}>{(r / 1000).toLocaleString()} kHz</option>)}
+              </select>
+            </label>
+            <label>Channels
+              <select value={snapshot.capture_format.channels} aria-label="Capture channels"
+                onChange={e => act(() => api.audioFormat(snapshot.capture_format.sample_rate, Number(e.target.value)))}>
+                {CHANNEL_COUNTS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </label>
+          </div>}
+          <p className="hint">48 kHz stereo suits most setups. Pick 5.1 or 7.1 when the source plays surround (for example the virtual speaker set to 7.1 in Windows), then choose which channels each output plays under its Advanced settings. Changing these restarts routing.</p>
         </div>
       </section>
 
@@ -399,14 +466,14 @@ function App() {
 
       <div className="section-head"><h2>Outputs</h2><span>{enabledCount} / {MAX_ENABLED_OUTPUTS} enabled · {active.length} available</span></div>
       <div className="devices">
-        {active.map(e => <OutputCard key={e.id} endpoint={e} status={statusById.get(e.id)} running={running} enabledCount={enabledCount} onAction={act} />)}
+        {active.map(e => <OutputCard key={e.id} endpoint={e} status={statusById.get(e.id)} running={running} enabledCount={enabledCount} sourceChannels={snapshot?.capture_format.channels ?? 2} onAction={act} />)}
         {configuredMissing.map(o => <article key={o.endpoint_id} className="device unavailable"><div className="device-top"><div className="device-info"><h3>{o.name}</h3><p>Device not found. It will not be replaced automatically.</p></div></div></article>)}
       </div>
       {!active.length && <div className="empty">No active output devices. Connect an audio device and select Refresh devices.</div>}
       {unavailable.length > 0 && <>
         <button className="link" onClick={() => setShowUnavailable(v => !v)}>{showUnavailable ? 'Hide' : 'Show'} {unavailable.length} unplugged or disabled devices</button>
         {showUnavailable && <div className="devices">
-          {unavailable.map(e => <OutputCard key={e.id} endpoint={e} status={statusById.get(e.id)} running={running} enabledCount={enabledCount} onAction={act} />)}
+          {unavailable.map(e => <OutputCard key={e.id} endpoint={e} status={statusById.get(e.id)} running={running} enabledCount={enabledCount} sourceChannels={snapshot?.capture_format.channels ?? 2} onAction={act} />)}
         </div>}
       </>}
 

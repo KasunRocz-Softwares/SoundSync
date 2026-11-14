@@ -384,6 +384,25 @@ impl Session {
             wBitsPerSample: 32,
             cbSize: 0,
         };
+        // More than two channels needs the extensible form with a speaker mask:
+        // 5.1 = FL FR C LFE BL BR, 7.1 = … SL SR (Windows channel order).
+        let extensible = WAVEFORMATEXTENSIBLE {
+            Format: WAVEFORMATEX {
+                wFormatTag: WAVE_FORMAT_EXTENSIBLE as u16,
+                cbSize: (size_of::<WAVEFORMATEXTENSIBLE>() - size_of::<WAVEFORMATEX>()) as u16,
+                ..wave
+            },
+            Samples: WAVEFORMATEXTENSIBLE_0 {
+                wValidBitsPerSample: 32,
+            },
+            dwChannelMask: if format.channels >= 8 { 0x63F } else { 0x3F },
+            SubFormat: windows::core::GUID::from_u128(0x00000003_0000_0010_8000_00aa00389b71),
+        };
+        let wave_ptr: *const WAVEFORMATEX = if format.channels > 2 {
+            &extensible.Format
+        } else {
+            &wave
+        };
         unsafe {
             client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
@@ -392,7 +411,7 @@ impl Session {
                     | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
                 200_000,
                 0,
-                &wave,
+                wave_ptr,
                 None,
             )?;
             let capture = client.GetService::<IAudioCaptureClient>()?;

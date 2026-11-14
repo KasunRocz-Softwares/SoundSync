@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pick-impulse-response"
+description = "Enables the pick_impulse_response command without any pre-configured scope."
+commands.allow = ["pick_impulse_response"]
+
+[[permission]]
+identifier = "deny-pick-impulse-response"
+description = "Denies the pick_impulse_response command without any pre-configured scope."
+commands.deny = ["pick_impulse_response"]
