@@ -16,8 +16,10 @@ pub const MID_HZ: f64 = 1_000.0;
 pub const TREBLE_HZ: f64 = 8_000.0;
 /// Allowed low-cut corner frequencies (0 = off).
 pub const LOW_CUT_OPTIONS: [u32; 7] = [0, 40, 60, 80, 100, 120, 150];
-/// 4 manual stages + 10 room-correction bands.
-const STAGES: usize = 14;
+/// 4 manual stages + 10 graphic-EQ bands + 10 room-correction bands.
+const STAGES: usize = 24;
+const GRAPHIC_START: usize = 4;
+const ROOM_START: usize = 14;
 pub const ROOM_MAX_CUT_DB: f32 = -12.0;
 pub const ROOM_MAX_BOOST_DB: f32 = 6.0;
 
@@ -45,6 +47,14 @@ pub struct EqSettings {
     /// Virtual bass amount 0…1: harmonics that make missing bass audible.
     #[serde(default)]
     pub virtual_bass: f32,
+    /// 10-band graphic EQ on the octave bands 31.5 Hz … 16 kHz, ±12 dB.
+    /// Applied when `enabled`, on top of bass / mid / treble.
+    #[serde(default)]
+    pub graphic_db: [f32; 10],
+    /// Last room measurement, dB vs the mids per band (None = not heard).
+    /// Kept so the correction can be recomputed for another target curve.
+    #[serde(default)]
+    pub room_response: [Option<f32>; 10],
 }
 
 impl EqSettings {
@@ -55,7 +65,10 @@ impl EqSettings {
                 "Low cut must be off, 40, 60, 80, 100, 120 or 150 Hz",
             ));
         }
-        for band in [self.bass_db, self.mid_db, self.treble_db] {
+        for band in [self.bass_db, self.mid_db, self.treble_db]
+            .into_iter()
+            .chain(self.graphic_db)
+        {
             if !band.is_finite() || band.abs() > MAX_BAND_DB {
                 return Err(CommandError::new(
                     "invalid_eq",
@@ -85,7 +98,11 @@ impl EqSettings {
     /// Pre-gain that keeps the largest boost from clipping.
     pub fn headroom(&self) -> f32 {
         let manual = if self.enabled {
-            self.bass_db.max(self.mid_db).max(self.treble_db).max(0.0)
+            self.graphic_db
+                .iter()
+                .cloned()
+                .fold(self.bass_db.max(self.mid_db).max(self.treble_db), f32::max)
+                .max(0.0)
         } else {
             0.0
         };
@@ -153,6 +170,14 @@ impl Biquad {
             -2.0 * c,
             1.0 - alpha,
         )
+    }
+
+    /// Band-pass with 0 dB gain at `freq` (RBJ, constant peak gain).
+    pub fn band_pass(freq: f64, rate: f64, q: f64) -> Biquad {
+        let w = 2.0 * PI * freq / rate;
+        let alpha = w.sin() / (2.0 * q);
+        let c = w.cos();
+        Self::normalize(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * c, 1.0 - alpha)
     }
 
     /// One sample through this biquad (transposed direct form II).
@@ -246,6 +271,15 @@ pub fn design(settings: &EqSettings, rate: u32) -> [Biquad; STAGES] {
         stages[1] = Biquad::low_shelf(BASS_HZ, fs, f64::from(settings.bass_db));
         stages[2] = Biquad::peaking(MID_HZ, fs, f64::from(settings.mid_db), 0.9);
         stages[3] = Biquad::high_shelf(TREBLE_HZ, fs, f64::from(settings.treble_db));
+        for (i, (band, db)) in crate::room::BANDS
+            .iter()
+            .zip(settings.graphic_db)
+            .enumerate()
+        {
+            if *band < fs * 0.45 {
+                stages[GRAPHIC_START + i] = Biquad::peaking(*band, fs, f64::from(db), 1.41);
+            }
+        }
     }
     if settings.room_correction {
         for (i, (band, db)) in crate::room::BANDS
@@ -255,7 +289,7 @@ pub fn design(settings: &EqSettings, rate: u32) -> [Biquad; STAGES] {
         {
             if *band < fs * 0.45 {
                 // One-octave peaking filters, one per measured band.
-                stages[4 + i] = Biquad::peaking(*band, fs, f64::from(db), 1.41);
+                stages[ROOM_START + i] = Biquad::peaking(*band, fs, f64::from(db), 1.41);
             }
         }
     }
@@ -455,15 +489,37 @@ mod tests {
         s.correction_db[2] = -6.0; // 125 Hz
         let stages = design(&s, 48_000);
         assert!(
-            stages[..4].iter().all(|b| *b == Biquad::IDENTITY),
-            "manual EQ off"
+            stages[..ROOM_START].iter().all(|b| *b == Biquad::IDENTITY),
+            "manual and graphic EQ off"
         );
-        assert!((db(stages[6].magnitude(125.0, 48_000.0)) + 6.0).abs() < 0.05);
+        assert!((db(stages[ROOM_START + 2].magnitude(125.0, 48_000.0)) + 6.0).abs() < 0.05);
         s.correction_db[5] = 3.0;
         assert!((s.headroom() - 10f32.powf(-3.0 / 20.0)).abs() < 1e-6);
         assert!(s.validate().is_ok());
         s.correction_db[0] = 7.0;
         assert!(s.validate().is_err(), "boost over +6 dB rejected");
+    }
+
+    #[test]
+    fn graphic_eq_bands_hit_their_gains_and_count_toward_headroom() {
+        let mut s = EqSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        s.graphic_db[4] = 6.0; // 500 Hz
+        s.graphic_db[8] = -9.0; // 8 kHz
+        let stages = design(&s, 48_000);
+        let total = |f: f64| -> f64 { stages.iter().map(|b| db(b.magnitude(f, 48_000.0))).sum() };
+        assert!((total(500.0) - 6.0).abs() < 0.6, "{}", total(500.0));
+        assert!((total(8_000.0) + 9.0).abs() < 0.8, "{}", total(8_000.0));
+        assert!((s.headroom() - 10f32.powf(-6.0 / 20.0)).abs() < 1e-6);
+        assert!(s.validate().is_ok());
+        s.graphic_db[0] = 13.0;
+        assert!(s.validate().is_err());
+        // Graphic EQ follows the Equalizer switch.
+        s.graphic_db[0] = 0.0;
+        s.enabled = false;
+        assert!(design(&s, 48_000).iter().all(|b| *b == Biquad::IDENTITY));
     }
 
     #[test]

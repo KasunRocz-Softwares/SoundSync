@@ -126,6 +126,13 @@ pub struct CalibrationReport {
     pub outputs: Vec<crate::calibration::CalibratedOutput>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputSpectrum {
+    pub endpoint_id: String,
+    /// Octave bands 31.5 Hz … 16 kHz, dBFS.
+    pub levels_db: [f32; 10],
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppSourceStatus {
     pub exe: String,
@@ -153,6 +160,12 @@ pub struct EngineSnapshot {
     pub spatial: SpatialConfig,
     /// Tilt, loudness, crossover, normalize, night mode.
     pub sound: crate::enhance::SoundSettings,
+    /// The listening mode the user's tone settings match (Custom if none).
+    pub listening_mode: crate::enhance::ListeningMode,
+    /// Apps that switch the listening mode while they play.
+    pub app_modes: Vec<crate::enhance::AppMode>,
+    /// The playing app whose mode is overriding the tone right now.
+    pub auto_mode: Option<crate::enhance::AppMode>,
     /// Per-app routing status (source = Apps).
     pub app_sources: Vec<AppSourceStatus>,
     /// Present while a microphone calibration is running.
@@ -174,6 +187,9 @@ impl EngineSnapshot {
             distance_compensation: true,
             spatial: SpatialConfig::default(),
             sound: crate::enhance::SoundSettings::default(),
+            listening_mode: crate::enhance::ListeningMode::Custom,
+            app_modes: Vec::new(),
+            auto_mode: None,
             app_sources: Vec::new(),
             calibration: None,
             endpoints: Vec::new(),

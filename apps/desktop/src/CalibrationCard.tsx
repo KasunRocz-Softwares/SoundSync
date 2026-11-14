@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AudioWaveform, Mic, Wand2 } from 'lucide-react';
 import { api, errorMessage } from './api';
-import { ROOM_BANDS, type CalibrationReport, type EngineSnapshot, type Microphone, type RoomReport } from './types';
+import { ROOM_BANDS, type CalibrationReport, type EngineSnapshot, type Microphone, type RoomReport, type RoomTarget } from './types';
 
 const bandLabel = (f: number) => (f >= 1000 ? `${f / 1000}k` : `${f}`);
 
@@ -57,6 +57,15 @@ export function CalibrationCard({ snapshot, onDone }: { snapshot: EngineSnapshot
       </button>
     </div>
     <p className="hint">Measure room plays a short rising tone through each speaker (about {playing.length * 5.5 + 3} s), compares what the microphone hears with what was played, and stores a gentle 10-band correction in each speaker's Equalizer. It mostly cuts room booms, never boosts a speaker's missing deep bass, and includes the microphone's own colouration, so treat it as a starting point.</p>
+    {snapshot && <label className="target-row">
+      Room correction aims for
+      <select value={snapshot.sound.room_target} aria-label="Room correction target"
+        onChange={e => { const room_target = e.target.value as RoomTarget; void api.sound({ ...snapshot.sound, room_target }).then(onDone, err => setError(errorMessage(err))); }}>
+        <option value="warm">Warm (recommended)</option>
+        <option value="flat">Flat</option>
+      </select>
+      <span className="muted">Warm keeps a little more bass and softer treble; flat-measured rooms often sound thin. Changing it re-aims your last measurement, no need to measure again.</span>
+    </label>}
     {!snapshot?.running && <p className="field-error">Start routing first.</p>}
     {snapshot?.running && playing.length < 2 && <p className="field-error">Needs at least two playing, unmuted outputs.</p>}
     {progress && <div className="calib-progress" role="status">

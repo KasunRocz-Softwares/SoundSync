@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-listening-mode"
+description = "Enables the apply_listening_mode command without any pre-configured scope."
+commands.allow = ["apply_listening_mode"]
+
+[[permission]]
+identifier = "deny-apply-listening-mode"
+description = "Denies the apply_listening_mode command without any pre-configured scope."
+commands.deny = ["apply_listening_mode"]

@@ -3,7 +3,7 @@
 //! encoding. The Windows worker calls `RenderPipeline::render` from its event loop;
 //! that call never allocates, locks, logs, blocks, or performs I/O.
 use crate::dsp::DspError;
-use crate::enhance::{EnhanceProcessor, EnhanceShared};
+use crate::enhance::{EnhanceProcessor, EnhanceShared, SpectrumMeter, SpectrumShared};
 use crate::eq::{EqProcessor, EqShared};
 use crate::spatial::{virtual_channels, GainMatrix, LowPass, SpatialShared, MAX_VIRTUAL};
 use crate::{PcmConsumer, PcmFormat};
@@ -160,6 +160,8 @@ pub struct OutputControls {
     pub eq: EqShared,
     /// Bass routing, virtual bass, tone and dynamics published by the control thread.
     pub enhance: EnhanceShared,
+    /// Octave-band levels of what this output plays, while someone watches.
+    pub spectrum: SpectrumShared,
 }
 
 impl OutputControls {
@@ -178,6 +180,7 @@ impl OutputControls {
             subwoofer: AtomicBool::new(false),
             eq: EqShared::new(),
             enhance: EnhanceShared::default(),
+            spectrum: SpectrumShared::default(),
         }
     }
     pub fn spatial_slot(&self) -> Option<usize> {
@@ -365,6 +368,7 @@ pub struct RenderPipeline {
     lfe_coefficient: f32,
     eq: EqProcessor,
     enhance: EnhanceProcessor,
+    meter: SpectrumMeter,
 }
 
 impl RenderPipeline {
@@ -414,6 +418,7 @@ impl RenderPipeline {
             lfe_coefficient: LowPass::coefficient(format.sample_rate),
             eq: EqProcessor::default(),
             enhance: EnhanceProcessor::new(format.sample_rate),
+            meter: SpectrumMeter::new(format.sample_rate),
         })
     }
 
@@ -625,6 +630,7 @@ impl RenderPipeline {
         let mut virtual_frame = [0.0f32; MAX_VIRTUAL];
         self.eq.refresh(&self.controls.eq);
         self.enhance.refresh(&self.controls.enhance);
+        let metering = self.controls.spectrum.watching();
         let gain_step = if frames_out > 0 {
             (target_gain - self.gain) / frames_out as f32
         } else {
@@ -685,6 +691,9 @@ impl RenderPipeline {
             }
             self.enhance.process(out);
             self.eq.process(out);
+            if metering {
+                self.meter.push(out);
+            }
             self.phase += ratio;
             while self.phase >= 1.0 && self.len > 0 {
                 self.phase -= 1.0;
@@ -693,6 +702,9 @@ impl RenderPipeline {
             frame += 1;
         }
         self.gain = target_gain;
+        if metering {
+            self.meter.publish(&self.controls.spectrum);
+        }
         self.publish_metrics(frames_out, self.primed);
     }
 

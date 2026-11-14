@@ -122,7 +122,7 @@ pub struct RoomResult {
 
 /// Analyses one output's window of the recording.
 /// `noise` is a stretch of the lead-in (room noise only).
-pub fn analyze(window: &[f32], noise: &[f32], rate: u32) -> RoomResult {
+pub fn analyze(window: &[f32], noise: &[f32], rate: u32, target: RoomTarget) -> RoomResult {
     let measured = band_energies(window, rate);
     let noise_e = band_energies(noise, rate);
     // Reference: the same bands of the dry sweep, over the same duration.
@@ -152,36 +152,68 @@ pub fn analyze(window: &[f32], noise: &[f32], rate: u32) -> RoomResult {
         mids[mids.len() / 2]
     };
 
-    let mut response = vec![None; 10];
-    let mut correction = [0.0f32; 10];
+    let mut response = [None; 10];
     for i in 0..10 {
-        if !usable[i] {
-            continue;
-        }
-        let dev = raw[i] - level;
-        response[i] = Some(dev as f32);
-        // Bass far below the mids is the speaker's natural roll-off: leave it.
-        if i <= 2 && dev < -ROLLOFF_DB {
-            continue;
-        }
-        // Correct half the deviation: rooms vary across seats and mics aren't flat.
-        correction[i] = ((-dev * 0.5) as f32).clamp(MAX_CUT_DB, MAX_BOOST_DB);
-        // Voice and headset microphones barely hear the extremes, so a "deficit"
-        // there is usually the mic, not the room: only boost 63 Hz – 4 kHz.
-        if !BOOSTABLE.contains(&i) {
-            correction[i] = correction[i].min(0.0);
-        }
-        if correction[i].abs() < 0.5 {
-            correction[i] = 0.0;
+        if usable[i] {
+            response[i] = Some((raw[i] - level) as f32);
         }
     }
     let total: f64 = measured.iter().filter(|e| e.is_finite()).sum();
     let total_noise: f64 = noise_e.iter().filter(|e| e.is_finite()).sum::<f64>() * scale;
     RoomResult {
-        response_db: response,
-        correction_db: correction,
+        response_db: response.to_vec(),
+        correction_db: correction(&response, target),
         snr_db: (10.0 * (total / total_noise.max(1e-20)).log10()) as f32,
     }
+}
+
+/// What room correction aims for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomTarget {
+    /// Equal level in every band.
+    Flat,
+    /// Gently rising bass and falling treble, closer to how a good speaker in a
+    /// room is usually preferred; flat-measured rooms tend to sound thin.
+    #[default]
+    Warm,
+}
+
+impl RoomTarget {
+    /// Target level per band (31.5 Hz … 16 kHz) relative to the mids, dB.
+    pub fn curve(self) -> [f32; 10] {
+        match self {
+            RoomTarget::Flat => [0.0; 10],
+            RoomTarget::Warm => [3.0, 3.0, 2.0, 1.0, 0.0, 0.0, 0.0, -0.5, -1.5, -2.5],
+        }
+    }
+}
+
+/// Correction per band for a measured response (dB vs the mids) and a target.
+pub fn correction(response: &[Option<f32>; 10], target: RoomTarget) -> [f32; 10] {
+    let curve = target.curve();
+    let mut out = [0.0f32; 10];
+    for i in 0..10 {
+        let Some(dev) = response[i] else {
+            continue;
+        };
+        // Bass far below the mids is the speaker's natural roll-off: leave it.
+        if i <= 2 && f64::from(dev) < -ROLLOFF_DB {
+            continue;
+        }
+        // Correct half the deviation: rooms vary across seats and mics aren't flat.
+        let mut c = (-(dev - curve[i]) * 0.5).clamp(MAX_CUT_DB, MAX_BOOST_DB);
+        // Voice and headset microphones barely hear the extremes, so a "deficit"
+        // there is usually the mic, not the room: only boost 63 Hz – 4 kHz.
+        if !BOOSTABLE.contains(&i) {
+            c = c.min(0.0);
+        }
+        if c.abs() < 0.5 {
+            c = 0.0;
+        }
+        out[i] = (c * 10.0).round() / 10.0;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -235,7 +267,7 @@ mod tests {
     #[test]
     fn flat_speaker_needs_no_correction() {
         let window = sweep(SEGMENT_S);
-        let result = analyze(&window, &noise(48_000, 0.0001), RATE);
+        let result = analyze(&window, &noise(48_000, 0.0001), RATE, RoomTarget::Flat);
         for (i, c) in result.correction_db.iter().enumerate() {
             assert!(c.abs() < 0.6, "band {} {c}", BANDS[i]);
         }
@@ -251,7 +283,7 @@ mod tests {
             &peaked,
             Biquad::peaking(2_000.0, f64::from(RATE), -6.0, 1.4),
         );
-        let r = analyze(&shaped, &noise(48_000, 0.0001), RATE);
+        let r = analyze(&shaped, &noise(48_000, 0.0001), RATE, RoomTarget::Flat);
         assert!(
             r.correction_db[2] <= -2.5,
             "125 Hz cut: {:?}",
@@ -271,7 +303,7 @@ mod tests {
         let dry = sweep(SEGMENT_S);
         let dull = filter(&dry, Biquad::peaking(16_000.0, f64::from(RATE), -9.0, 1.4));
         let thin = filter(&dull, Biquad::peaking(31.5, f64::from(RATE), -8.0, 1.4));
-        let r = analyze(&thin, &noise(48_000, 0.0001), RATE);
+        let r = analyze(&thin, &noise(48_000, 0.0001), RATE, RoomTarget::Flat);
         assert!(
             r.correction_db[9] <= 0.0,
             "no 16 kHz boost: {:?}",
@@ -289,7 +321,7 @@ mod tests {
         );
         // A peak at the top end is still cut.
         let bright = filter(&dry, Biquad::peaking(16_000.0, f64::from(RATE), 9.0, 1.4));
-        let r = analyze(&bright, &noise(48_000, 0.0001), RATE);
+        let r = analyze(&bright, &noise(48_000, 0.0001), RATE, RoomTarget::Flat);
         assert!(
             r.correction_db[9] < -1.0,
             "16 kHz peak cut: {:?}",
@@ -303,15 +335,32 @@ mod tests {
         let dry = sweep(SEGMENT_S);
         let mut small = filter(&dry, Biquad::high_pass(150.0, f64::from(RATE)));
         small = filter(&small, Biquad::high_pass(150.0, f64::from(RATE)));
-        let r = analyze(&small, &noise(48_000, 0.0001), RATE);
+        let r = analyze(&small, &noise(48_000, 0.0001), RATE, RoomTarget::Flat);
         assert_eq!(r.correction_db[0], 0.0, "no boost at 31 Hz");
         assert_eq!(r.correction_db[1], 0.0, "no boost at 63 Hz");
         // Very loud room noise: nothing is trusted.
-        let loud = analyze(&dry, &noise(48_000, 4.0), RATE);
+        let loud = analyze(&dry, &noise(48_000, 4.0), RATE, RoomTarget::Flat);
         assert!(
             loud.correction_db.iter().all(|c| *c == 0.0),
             "{:?}",
             loud.correction_db
         );
+    }
+
+    #[test]
+    fn warm_target_keeps_more_bass_and_less_treble_than_flat() {
+        // A perfectly flat measurement: Flat changes nothing, Warm lifts the
+        // low-mids a little and trims the top.
+        let flat_room = [Some(0.0f32); 10];
+        assert_eq!(correction(&flat_room, RoomTarget::Flat), [0.0; 10]);
+        let warm = correction(&flat_room, RoomTarget::Warm);
+        assert!(warm[1] > 1.0 && warm[1] <= MAX_BOOST_DB, "63 Hz {warm:?}");
+        assert_eq!(warm[0], 0.0, "31 Hz is never boosted");
+        assert!(warm[9] < -1.0, "16 kHz trimmed {warm:?}");
+        assert_eq!(warm[5], 0.0, "1 kHz untouched");
+        // Unheard bands stay uncorrected.
+        let mut partial = flat_room;
+        partial[9] = None;
+        assert_eq!(correction(&partial, RoomTarget::Warm)[9], 0.0);
     }
 }

@@ -46,6 +46,7 @@ pub(crate) fn apply_profile(
         .map_err(engine_error)?;
     engine.set_spatial(plan.spatial).map_err(engine_error)?;
     engine.set_sound(plan.sound).map_err(engine_error)?;
+    engine.set_app_modes(plan.app_modes.clone()).map_err(engine_error)?;
     if let Some(source) = plan.source.clone() {
         engine.set_source(source).map_err(engine_error)?;
     }
@@ -420,6 +421,39 @@ async fn set_sound(
     state.engine.set_sound(settings).map_err(engine_error)
 }
 
+#[tauri::command]
+async fn apply_listening_mode(
+    mode: syncsound_engine::enhance::ListeningMode,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    state.engine.apply_listening_mode(mode).map_err(engine_error)
+}
+
+#[tauri::command]
+async fn set_app_modes(
+    modes: Vec<syncsound_engine::enhance::AppMode>,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    syncsound_engine::enhance::validate_app_modes(&modes)?;
+    if modes
+        .iter()
+        .any(|m| m.exe.eq_ignore_ascii_case("syncsound-desktop.exe"))
+    {
+        return Err(CommandError::new(
+            "invalid_app_modes",
+            "SyncSound itself can't switch the listening mode",
+        ));
+    }
+    state.engine.set_app_modes(modes).map_err(engine_error)
+}
+
+#[tauri::command]
+async fn get_spectrum(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<syncsound_engine::routing::OutputSpectrum>> {
+    state.engine.spectrum().map_err(engine_error)
+}
+
 #[derive(Serialize)]
 struct SyncMetrics {
     running: bool,
@@ -613,6 +647,9 @@ pub fn run() {
             set_spatial,
             set_device_eq,
             set_sound,
+            apply_listening_mode,
+            set_app_modes,
+            get_spectrum,
             list_audio_apps,
             select_app_sources,
             list_microphones,

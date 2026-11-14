@@ -34,6 +34,12 @@ const NIGHT_RATIO: f32 = 4.0;
 const NIGHT_MAKEUP_DB: f32 = 8.0;
 /// Soft limiter knee: samples above this are rounded off instead of clipping.
 const LIMIT_KNEE: f32 = 0.85;
+pub const MAX_WIDTH: f32 = 2.0;
+/// De-harsh: the 2–6 kHz band is cut while it is above this level, by up to
+/// `DEHARSH_MAX_CUT_DB` × amount.
+const DEHARSH_HZ: f64 = 3_500.0;
+const DEHARSH_THRESHOLD_DB: f32 = -30.0;
+const DEHARSH_MAX_CUT_DB: f32 = 9.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +68,12 @@ pub struct SoundSettings {
     pub night_mode: bool,
     /// Delay calibration also evens out speaker levels at the seat.
     pub match_levels: bool,
+    /// Stereo width: 0 = mono, 1 = unchanged, up to 2 = extra wide.
+    pub width: f32,
+    /// De-harsh amount 0…1: cuts 2–6 kHz only while it is loud.
+    pub deharsh: f32,
+    /// What Measure room aims for.
+    pub room_target: crate::room::RoomTarget,
 }
 
 impl Default for SoundSettings {
@@ -73,8 +85,98 @@ impl Default for SoundSettings {
             normalize: false,
             night_mode: false,
             match_levels: true,
+            width: 1.0,
+            deharsh: 0.0,
+            room_target: crate::room::RoomTarget::default(),
         }
     }
+}
+
+/// One-click tone settings for what is playing. Custom = the user's own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListeningMode {
+    #[default]
+    Custom,
+    Music,
+    Movie,
+    Game,
+    Voice,
+}
+
+impl ListeningMode {
+    pub const ALL: [ListeningMode; 4] = [
+        ListeningMode::Music,
+        ListeningMode::Movie,
+        ListeningMode::Game,
+        ListeningMode::Voice,
+    ];
+
+    /// The mode's tone on top of `base` (crossover, room target and level
+    /// matching are speaker setup, not tone, so they are kept).
+    pub fn apply(self, base: SoundSettings) -> SoundSettings {
+        let (tilt_db, loudness, width, deharsh, normalize, night_mode) = match self {
+            ListeningMode::Custom => return base,
+            // Fuller, wider, slightly warm; dynamics left alone.
+            ListeningMode::Music => (0.0, 0.3, 1.2, 0.3, false, false),
+            // Wide and clear, gentle loudness, dialogue kept forward.
+            ListeningMode::Movie => (0.5, 0.2, 1.3, 0.4, false, false),
+            // Wide for positional cues, a little brighter for footsteps.
+            ListeningMode::Game => (1.0, 0.2, 1.3, 0.2, false, false),
+            // Calls, podcasts, videos: bright, narrow, levelled.
+            ListeningMode::Voice => (1.5, 0.0, 0.8, 0.5, true, false),
+        };
+        SoundSettings {
+            tilt_db,
+            loudness,
+            width,
+            deharsh,
+            normalize,
+            night_mode,
+            ..base
+        }
+    }
+
+    /// The mode whose tone `settings` currently matches, else Custom.
+    pub fn matching(settings: &SoundSettings) -> ListeningMode {
+        Self::ALL
+            .into_iter()
+            .find(|m| m.apply(*settings) == *settings)
+            .unwrap_or(ListeningMode::Custom)
+    }
+}
+
+/// Switch to `mode` while `exe` is playing sound.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppMode {
+    pub exe: String,
+    pub mode: ListeningMode,
+}
+
+pub const MAX_APP_MODES: usize = 16;
+
+pub fn validate_app_modes(modes: &[AppMode]) -> Result<(), CommandError> {
+    if modes.len() > MAX_APP_MODES {
+        return Err(CommandError::new(
+            "invalid_app_modes",
+            format!("At most {MAX_APP_MODES} apps can switch the listening mode"),
+        ));
+    }
+    for (i, m) in modes.iter().enumerate() {
+        let ok = !m.exe.is_empty()
+            && m.exe.len() <= 260
+            && m.exe.to_ascii_lowercase().ends_with(".exe")
+            && !m.exe.contains(['\\', '/', ':'])
+            && m.mode != ListeningMode::Custom
+            && !modes[..i].iter().any(|o| o.exe.eq_ignore_ascii_case(&m.exe));
+        if !ok {
+            return Err(CommandError::new(
+                "invalid_app_modes",
+                format!("Invalid app listening mode for {}", m.exe),
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl SoundSettings {
@@ -88,6 +190,12 @@ impl SoundSettings {
         }
         if !self.loudness.is_finite() || !(0.0..=1.0).contains(&self.loudness) {
             return bad("Loudness must be between 0 and 100%");
+        }
+        if !self.width.is_finite() || !(0.0..=MAX_WIDTH).contains(&self.width) {
+            return bad("Stereo width must be between 0 and 200%");
+        }
+        if !self.deharsh.is_finite() || !(0.0..=1.0).contains(&self.deharsh) {
+            return bad("De-harsh must be between 0 and 100%");
         }
         Ok(())
     }
@@ -108,6 +216,10 @@ pub struct EnhanceDesign {
     pub tone: [Biquad; 4],
     pub normalize: bool,
     pub night_mode: bool,
+    pub width: f32,
+    pub deharsh: f32,
+    /// Detects (and is subtracted to cut) the harsh band.
+    pub deharsh_band: Biquad,
 }
 
 impl Default for EnhanceDesign {
@@ -121,6 +233,9 @@ impl Default for EnhanceDesign {
             tone: [Biquad::IDENTITY; 4],
             normalize: false,
             night_mode: false,
+            width: 1.0,
+            deharsh: 0.0,
+            deharsh_band: Biquad::IDENTITY,
         }
     }
 }
@@ -153,6 +268,11 @@ pub fn design(
         ];
     }
     if role != BassRole::Subwoofer {
+        d.width = sound.width.clamp(0.0, MAX_WIDTH);
+        if sound.deharsh > 0.0 && DEHARSH_HZ < fs * 0.4 {
+            d.deharsh = sound.deharsh.clamp(0.0, 1.0);
+            d.deharsh_band = Biquad::band_pass(DEHARSH_HZ, fs, 0.9);
+        }
         let tilt = f64::from(sound.tilt_db) / 2.0;
         let loud = f64::from(sound.loudness);
         d.tone = [
@@ -183,12 +303,15 @@ impl EnhanceDesign {
         put(self.virtual_bass);
         put(f32::from(u8::from(self.normalize)));
         put(f32::from(u8::from(self.night_mode)));
+        put(self.width);
+        put(self.deharsh);
         for b in self
             .crossover
             .iter()
             .chain(&self.vb_extract)
             .chain(&self.vb_shape)
             .chain(&self.tone)
+            .chain(std::iter::once(&self.deharsh_band))
         {
             for v in [b.b0, b.b1, b.b2, b.a1, b.a2] {
                 put(v);
@@ -205,8 +328,11 @@ impl EnhanceDesign {
             a1: p[at + 3],
             a2: p[at + 4],
         };
-        let base = 4;
+        let base = 6;
         Self {
+            width: p[4],
+            deharsh: p[5],
+            deharsh_band: bq(base + 50),
             role: match p[0] as u8 {
                 1 => BassRole::Satellite,
                 2 => BassRole::Subwoofer,
@@ -277,6 +403,10 @@ pub struct EnhanceProcessor {
     crossover_state: [[(f32, f32); 2]; 2],
     vb_state: [(f32, f32); 4],
     tone_state: [[(f32, f32); 4]; 2],
+    deharsh_state: [(f32, f32); 2],
+    deharsh_env: f32,
+    deharsh_attack: f32,
+    deharsh_release: f32,
     // Dynamics
     agc_power: f32,
     agc_gain: f32,
@@ -311,6 +441,10 @@ impl EnhanceProcessor {
             crossover_state: [[(0.0, 0.0); 2]; 2],
             vb_state: [(0.0, 0.0); 4],
             tone_state: [[(0.0, 0.0); 4]; 2],
+            deharsh_state: [(0.0, 0.0); 2],
+            deharsh_env: 0.0,
+            deharsh_attack: one_pole(0.002, rate),
+            deharsh_release: one_pole(0.08, rate),
             agc_power: NORMALIZE_TARGET_RMS * NORMALIZE_TARGET_RMS,
             agc_gain: 1.0,
             comp_env: 0.0,
@@ -333,6 +467,8 @@ impl EnhanceProcessor {
             }
             self.filters_active = d.role != BassRole::Full
                 || d.virtual_bass > 0.0
+                || d.width != 1.0
+                || d.deharsh > 0.0
                 || d.tone.iter().any(|b| *b != Biquad::IDENTITY);
             if !d.normalize {
                 self.agc_gain = 1.0;
@@ -392,6 +528,12 @@ impl EnhanceProcessor {
         }
         let d = &self.d;
         let (mut l, mut r) = (frame[0], frame[1]);
+        if d.width != 1.0 && d.role != BassRole::Subwoofer {
+            let mid = 0.5 * (l + r);
+            let side = 0.5 * (l - r) * d.width;
+            l = mid + side;
+            r = mid - side;
+        }
         // Harmonics from the full-range signal, before the crossover removes it.
         let mut harmonics = 0.0;
         if d.virtual_bass > 0.0 {
@@ -429,8 +571,107 @@ impl EnhanceProcessor {
                 r = b.tick(&mut self.tone_state[1][i], r);
             }
         }
+        if d.deharsh > 0.0 {
+            let bl = d.deharsh_band.tick(&mut self.deharsh_state[0], l);
+            let br = d.deharsh_band.tick(&mut self.deharsh_state[1], r);
+            let peak = bl.abs().max(br.abs());
+            let coeff = if peak > self.deharsh_env {
+                self.deharsh_attack
+            } else {
+                self.deharsh_release
+            };
+            self.deharsh_env += (peak - self.deharsh_env) * coeff;
+            let over = 20.0 * self.deharsh_env.max(1e-6).log10() - DEHARSH_THRESHOLD_DB;
+            let cut_db = (over * 0.5).clamp(0.0, DEHARSH_MAX_CUT_DB * d.deharsh);
+            if cut_db > 0.0 {
+                // Subtracting part of the band lowers just that band.
+                let g = 1.0 - 10f32.powf(-cut_db / 20.0);
+                l -= g * bl;
+                r -= g * br;
+            }
+        }
         frame[0] = if l.is_finite() { soft_limit(l) } else { 0.0 };
         frame[1] = if r.is_finite() { soft_limit(r) } else { 0.0 };
+    }
+}
+
+/// Octave-band level meter for what an output actually plays (after every
+/// effect). Runs on the render thread only while the UI is watching; levels are
+/// published as dBFS through atomics.
+#[derive(Debug)]
+pub struct SpectrumShared {
+    pub watching: std::sync::atomic::AtomicBool,
+    levels: [AtomicU32; 10],
+}
+
+impl Default for SpectrumShared {
+    fn default() -> Self {
+        Self {
+            watching: std::sync::atomic::AtomicBool::new(false),
+            levels: std::array::from_fn(|_| AtomicU32::new(SPECTRUM_FLOOR_DB.to_bits())),
+        }
+    }
+}
+
+pub const SPECTRUM_FLOOR_DB: f32 = -90.0;
+
+impl SpectrumShared {
+    pub fn levels_db(&self) -> [f32; 10] {
+        std::array::from_fn(|i| f32::from_bits(self.levels[i].load(Ordering::Relaxed)))
+    }
+    pub fn watching(&self) -> bool {
+        self.watching.load(Ordering::Relaxed)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SpectrumMeter {
+    bands: [Biquad; 10],
+    state: [(f32, f32); 10],
+    power: [f32; 10],
+    coeff: f32,
+}
+
+impl SpectrumMeter {
+    pub fn new(rate: u32) -> Self {
+        let fs = f64::from(rate);
+        Self {
+            bands: std::array::from_fn(|i| {
+                let f = crate::room::BANDS[i];
+                if f < fs * 0.45 {
+                    Biquad::band_pass(f, fs, 1.41)
+                } else {
+                    Biquad {
+                        b0: 0.0,
+                        ..Biquad::IDENTITY
+                    }
+                }
+            }),
+            state: [(0.0, 0.0); 10],
+            power: [0.0; 10],
+            coeff: one_pole(0.12, rate),
+        }
+    }
+
+    #[inline]
+    pub fn push(&mut self, frame: &[f32]) {
+        let x = match frame {
+            [l, r, ..] => 0.5 * (l + r),
+            [m] => *m,
+            [] => 0.0,
+        };
+        for ((b, s), p) in self.bands.iter().zip(&mut self.state).zip(&mut self.power) {
+            let y = b.tick(s, x);
+            *p += (y * y - *p) * self.coeff;
+        }
+    }
+
+    pub fn publish(&self, shared: &SpectrumShared) {
+        for (slot, p) in shared.levels.iter().zip(self.power) {
+            // ×2: a full-scale sine reads 0 dBFS.
+            let db = (10.0 * (2.0 * p).max(1e-12).log10()).max(SPECTRUM_FLOOR_DB);
+            slot.store(db.to_bits(), Ordering::Relaxed);
+        }
     }
 }
 
@@ -438,6 +679,20 @@ impl EnhanceProcessor {
 mod tests {
     use super::*;
     use std::f32::consts::PI;
+
+    #[test]
+    fn spectrum_meter_lights_the_band_of_a_tone() {
+        let mut m = SpectrumMeter::new(RATE);
+        for i in 0..RATE {
+            let x = 0.5 * (2.0 * PI * 1_000.0 * i as f32 / RATE as f32).sin();
+            m.push(&[x, x]);
+        }
+        let shared = SpectrumShared::default();
+        m.publish(&shared);
+        let levels = shared.levels_db();
+        assert!((levels[5] - db(0.5)).abs() < 1.5, "1 kHz band {levels:?}");
+        assert!(levels[1] < levels[5] - 20.0 && levels[9] < levels[5] - 20.0, "{levels:?}");
+    }
 
     const RATE: u32 = 48_000;
 
@@ -589,9 +844,90 @@ mod tests {
             night_mode: true,
             crossover_hz: 80,
             match_levels: false,
+            width: 1.4,
+            deharsh: 0.6,
+            ..Default::default()
         };
         let d = design(BassRole::Satellite, 0.7, &sound, RATE);
         assert_eq!(EnhanceDesign::from_params(&d.to_params()), d);
+    }
+
+    #[test]
+    fn width_scales_the_side_signal_only() {
+        let wide = SoundSettings {
+            width: 2.0,
+            ..Default::default()
+        };
+        let mut p = processor(BassRole::Full, 0.0, wide);
+        // Mid (same in both) is unchanged; side (opposite) is doubled.
+        let mut mid = [0.2, 0.2];
+        p.process(&mut mid);
+        assert!((mid[0] - 0.2).abs() < 1e-6 && (mid[1] - 0.2).abs() < 1e-6);
+        let mut side = [0.2, -0.2];
+        p.process(&mut side);
+        assert!((side[0] - 0.4).abs() < 1e-6 && (side[1] + 0.4).abs() < 1e-6, "{side:?}");
+        let mono = SoundSettings {
+            width: 0.0,
+            ..Default::default()
+        };
+        let mut p = processor(BassRole::Full, 0.0, mono);
+        let mut f = [0.4, 0.0];
+        p.process(&mut f);
+        assert!((f[0] - 0.2).abs() < 1e-6 && (f[1] - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deharsh_cuts_loud_presence_band_but_not_quiet_or_bass() {
+        let sound = SoundSettings {
+            deharsh: 1.0,
+            ..Default::default()
+        };
+        let mut loud = processor(BassRole::Full, 0.0, sound);
+        let cut = db(rms_out(&mut loud, 3_500.0, 0.7, 0.5) / (0.7 * 0.7071));
+        assert!(cut < -4.0, "loud 3.5 kHz cut by {cut} dB");
+        let mut quiet = processor(BassRole::Full, 0.0, sound);
+        let q = db(rms_out(&mut quiet, 3_500.0, 0.01, 0.5) / (0.01 * 0.7071));
+        assert!(q.abs() < 0.5, "quiet 3.5 kHz untouched: {q}");
+        let mut bass = processor(BassRole::Full, 0.0, sound);
+        let b = db(rms_out(&mut bass, 100.0, 0.7, 0.5) / (0.7 * 0.7071));
+        assert!(b.abs() < 1.0, "loud bass untouched: {b}");
+    }
+
+    #[test]
+    fn listening_modes_set_tone_but_keep_speaker_setup() {
+        let base = SoundSettings {
+            crossover_hz: 80,
+            match_levels: false,
+            room_target: crate::room::RoomTarget::Flat,
+            ..Default::default()
+        };
+        for mode in ListeningMode::ALL {
+            let s = mode.apply(base);
+            assert!(s.validate().is_ok(), "{mode:?}");
+            assert_eq!(s.crossover_hz, 80);
+            assert!(!s.match_levels);
+            assert_eq!(s.room_target, crate::room::RoomTarget::Flat);
+            assert_eq!(ListeningMode::matching(&s), mode);
+        }
+        assert_eq!(ListeningMode::Custom.apply(base), base);
+        assert_eq!(ListeningMode::matching(&base), ListeningMode::Custom);
+    }
+
+    #[test]
+    fn validates_app_modes() {
+        let m = |exe: &str, mode| AppMode {
+            exe: exe.into(),
+            mode,
+        };
+        assert!(validate_app_modes(&[m("Spotify.exe", ListeningMode::Music)]).is_ok());
+        assert!(validate_app_modes(&[m("..\\x.exe", ListeningMode::Music)]).is_err());
+        assert!(validate_app_modes(&[m("game", ListeningMode::Game)]).is_err());
+        assert!(validate_app_modes(&[m("a.exe", ListeningMode::Custom)]).is_err());
+        assert!(validate_app_modes(&[
+            m("a.exe", ListeningMode::Music),
+            m("A.EXE", ListeningMode::Game)
+        ])
+        .is_err());
     }
 
     #[test]
