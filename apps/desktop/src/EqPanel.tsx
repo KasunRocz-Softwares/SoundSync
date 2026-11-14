@@ -3,8 +3,9 @@ import { api } from './api';
 import { ROOM_BANDS, type EngineSnapshot, type EqSettings, type OutputStatus } from './types';
 
 const LOW_CUTS = [0, 40, 60, 80, 100, 120, 150];
-const PRESETS: { label: string; eq: Omit<EqSettings, 'enabled' | 'room_correction' | 'correction_db' | 'bass_role' | 'virtual_bass'> }[] = [
-  { label: 'Flat', eq: { low_cut_hz: 0, bass_db: 0, mid_db: 0, treble_db: 0 } },
+type ManualEq = Pick<EqSettings, 'low_cut_hz' | 'bass_db' | 'mid_db' | 'treble_db'> & Partial<Pick<EqSettings, 'graphic_db'>>;
+const PRESETS: { label: string; eq: ManualEq }[] = [
+  { label: 'Flat', eq: { low_cut_hz: 0, bass_db: 0, mid_db: 0, treble_db: 0, graphic_db: Array(10).fill(0) } },
   { label: 'Bass boost', eq: { low_cut_hz: 0, bass_db: 6, mid_db: 0, treble_db: 1 } },
   { label: 'Small speaker', eq: { low_cut_hz: 100, bass_db: -2, mid_db: 1, treble_db: 0 } },
   { label: 'Voice', eq: { low_cut_hz: 80, bass_db: -3, mid_db: 3, treble_db: 1 } },
@@ -43,11 +44,13 @@ function mag([b0, b1, b2, a1, a2]: Bq, f: number) {
   return Math.sqrt((nr * nr + ni * ni) / (dr * dr + di * di));
 }
 function responseDb(eq: EqSettings, f: number) {
+  const graphic = eq.graphic_db ?? [];
   const manual = eq.enabled
-    ? [eq.low_cut_hz ? highPass(eq.low_cut_hz) : null, shelf(100, eq.bass_db, false), peak(1000, eq.mid_db, 0.9), shelf(8000, eq.treble_db, true)]
+    ? [eq.low_cut_hz ? highPass(eq.low_cut_hz) : null, shelf(100, eq.bass_db, false), peak(1000, eq.mid_db, 0.9), shelf(8000, eq.treble_db, true),
+      ...ROOM_BANDS.map((b, i) => (b < RATE * 0.45 ? peak(b, graphic[i] ?? 0, 1.41) : null))]
     : [];
   const room = eq.room_correction ? ROOM_BANDS.map((b, i) => (b < RATE * 0.45 ? peak(b, eq.correction_db[i] ?? 0, 1.41) : null)) : [];
-  const headroom = -(eq.enabled ? Math.max(0, eq.bass_db, eq.mid_db, eq.treble_db) : 0)
+  const headroom = -(eq.enabled ? Math.max(0, eq.bass_db, eq.mid_db, eq.treble_db, ...graphic) : 0)
     - (eq.room_correction ? Math.max(0, ...eq.correction_db) : 0);
   return [...manual, ...room].reduce((db, s) => db + (s ? 20 * Math.log10(mag(s, f)) : 0), headroom);
 }
@@ -63,7 +66,7 @@ function Curve({ eq }: { eq: EqSettings }) {
       pts.push(`${i ? 'L' : 'M'}${xs(f).toFixed(1)},${ys(responseDb(eq, f)).toFixed(1)}`);
     }
     return pts.join(' ');
-  }, [eq.enabled, eq.low_cut_hz, eq.bass_db, eq.mid_db, eq.treble_db, eq.room_correction, eq.correction_db.join(',')]);
+  }, [eq.enabled, eq.low_cut_hz, eq.bass_db, eq.mid_db, eq.treble_db, eq.room_correction, eq.correction_db.join(','), (eq.graphic_db ?? []).join(',')]);
   return <svg className="eq-curve" viewBox={`0 0 ${W} ${H + 16}`} role="img" aria-label="Frequency response">
     {[100, 1000, 10000].map(f => <g key={f}><line x1={xs(f)} x2={xs(f)} y1={0} y2={H} /><text x={xs(f)} y={H + 12}>{f >= 1000 ? `${f / 1000}k` : f}</text></g>)}
     <line className="zero" x1={0} x2={W} y1={ys(0)} y2={ys(0)} />
@@ -82,6 +85,22 @@ function BandSlider({ label, value, disabled, onCommit }: { label: string; value
     <input type="range" min={-12} max={12} step={0.5} value={v} disabled={disabled} aria-label={`${label} in dB`}
       onPointerDown={() => setDragging(true)} onChange={e => setV(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit} />
     <strong>{v > 0 ? '+' : ''}{v} dB</strong>
+  </label>;
+}
+
+/** One vertical graphic-EQ slider; commits when released. */
+function GraphicBand({ freq, value, disabled, onCommit }: { freq: number; value: number; disabled: boolean; onCommit: (v: number) => void }) {
+  const [v, setV] = useState(value);
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => { if (!dragging) setV(value); }, [value, dragging]);
+  const commit = () => { setDragging(false); if (v !== value) onCommit(v); };
+  const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`;
+  return <label className="gband">
+    <strong>{v > 0 ? '+' : ''}{v}</strong>
+    <input type="range" min={-12} max={12} step={0.5} value={v} disabled={disabled} aria-label={`${label} Hz in dB`}
+      onPointerDown={() => setDragging(true)} onChange={e => setV(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit}
+      onDoubleClick={() => { setV(0); onCommit(0); }} />
+    <span>{label}</span>
   </label>;
 }
 
@@ -111,6 +130,13 @@ function OutputEq({ output, act }: { output: OutputStatus; act: (fn: () => Promi
         <div className="presets">
           {PRESETS.map(p => <button key={p.label} disabled={!eq.enabled} onClick={() => set(p.eq)}>{p.label}</button>)}
         </div>
+        <div className="graphic">
+          <div className="graphic-head"><span>10-band</span><span className="muted">double-click a band to reset it</span></div>
+          <div className="graphic-bands">
+            {ROOM_BANDS.map((b, i) => <GraphicBand key={b} freq={b} value={eq.graphic_db?.[i] ?? 0} disabled={!eq.enabled}
+              onCommit={v => set({ graphic_db: ROOM_BANDS.map((_, k) => (k === i ? v : eq.graphic_db?.[k] ?? 0)) })} />)}
+          </div>
+        </div>
         <div className="room-row">
           <label className="check">
             <input type="checkbox" checked={eq.room_correction} disabled={eq.correction_db.every(c => c === 0)}
@@ -130,7 +156,7 @@ function OutputEq({ output, act }: { output: OutputStatus; act: (fn: () => Promi
 export function EqPanel({ snapshot, act }: { snapshot: EngineSnapshot | null; act: (fn: () => Promise<unknown>) => void }) {
   const outputs = (snapshot?.outputs ?? []).filter(o => o.config.enabled);
   return <section>
-    <p className="hint top">Shape each speaker separately. Bass at 100 Hz, mid at 1 kHz, treble at 8 kHz, ±12 dB. Boosts lower the overall level by the same amount so they never clip. Settings are saved in profiles.</p>
+    <p className="hint top">Shape each speaker separately. Bass at 100 Hz, mid at 1 kHz, treble at 8 kHz, plus a 10-band EQ for finer changes, all ±12 dB. Boosts lower the overall level by the same amount so they never clip. Settings are saved in profiles.</p>
     <div className="devices">
       {outputs.map(o => <OutputEq key={o.endpoint_id} output={o} act={act} />)}
       {!outputs.length && <div className="empty">Turn on an output on the Routing tab first.</div>}

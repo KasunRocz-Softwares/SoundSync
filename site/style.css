@@ -125,6 +125,18 @@ section.demo, section.features, section.how, section.faq { padding: 104px 0 0; }
 .cell-tall img { aspect-ratio: auto; flex: 1; min-height: 240px; }
 .cell:nth-child(2), .cell:nth-child(6) { background: linear-gradient(160deg, var(--accent-soft), transparent 60%), var(--panel); }
 
+/* Sound */
+section.sound { padding: 104px 0 0; }
+.sound-grid { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 56px; align-items: center; }
+.sound-copy h2 { font-size: clamp(30px, 3.6vw, 44px); }
+.sound-copy > p { margin-top: 12px; color: var(--muted); max-width: 52ch; }
+.sound-list { list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 18px; }
+.sound-list li { display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start; }
+.sound-list i { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); font-size: 21px; }
+.sound-list strong { display: block; font-weight: 600; font-size: 17px; }
+.sound-list span { display: block; margin-top: 3px; color: var(--muted); font-size: 15px; }
+.sound-shot { margin: 0; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--panel); }
+
 /* Steps */
 .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border-top: 1px solid var(--line); }
 .steps li { padding: 28px 28px 0 0; }
@@ -165,7 +177,7 @@ details p { padding: 0 0 22px; color: var(--muted); max-width: 64ch; }
 /* Responsive */
 @media (max-width: 960px) {
   .hero { padding: 48px 0 72px; }
-  .hero-grid, .faq-grid { grid-template-columns: 1fr; gap: 40px; }
+  .hero-grid, .faq-grid, .sound-grid { grid-template-columns: 1fr; gap: 40px; }
   .bento { grid-template-columns: 1fr 1fr; grid-template-areas: "route route" "calib tray" "room apps" "eq eq"; }
   .cell-tall img { flex: none; aspect-ratio: 16 / 8; min-height: 0; }
   .nav nav { display: none; }

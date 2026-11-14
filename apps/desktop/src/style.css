@@ -292,3 +292,44 @@ aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .band.crossover { grid-template-columns: auto 110px; gap: 10px; }
 .band.crossover select { width: 100%; }
 .sound-controls .band, .bass-vb .band { grid-template-columns: 90px 1fr 90px; }
+.tone-help { padding-left: 18px; display: grid; gap: 3px; }
+.tone-help strong { color: var(--muted); }
+
+/* Listening modes */
+.mode-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.mode { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 14px; text-align: left; border: 1px solid var(--line); background: var(--card); }
+.mode svg { color: var(--accent); }
+.mode small { color: var(--faint); font-size: 12px; font-weight: 400; }
+.mode.selected { border-color: var(--accent-strong); background: var(--accent-soft); }
+.mode.selected strong { color: #7bf0d8; }
+@media (max-width: 760px) { .mode-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* Live spectrum */
+.spectra { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.spectrum { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 11px; padding: 12px 12px 8px; }
+.spectrum .bars { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; height: 96px; align-items: end; }
+.spectrum .bar-slot { height: 100%; display: flex; align-items: flex-end; background: #0f1621; border-radius: 3px; overflow: hidden; }
+.spectrum .bar { width: 100%; height: 100%; background: var(--accent-strong); transform-origin: bottom; transition: transform 90ms linear; }
+.spectrum .bar.low { background: #2fc4ab; }
+.spectrum .bar-labels { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin-top: 4px; font-size: 10px; color: var(--faint); text-align: center; font-variant-numeric: tabular-nums; }
+.spectrum figcaption { font-size: 12.5px; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .spectrum .bar { transition: none; } }
+
+/* Per-app modes */
+.app-modes { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+.app-modes li { display: grid; grid-template-columns: 1fr 140px auto; gap: 8px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px 6px 12px; }
+.app-modes .exe { font-size: 13px; overflow-wrap: anywhere; }
+.icon-btn { padding: 6px; display: inline-flex; align-items: center; justify-content: center; }
+.app-mode-add { display: grid; grid-template-columns: 1fr 140px auto auto; gap: 8px; }
+.panel .app-mode-add select, .panel .app-modes select { width: 100%; }
+@media (max-width: 760px) { .app-mode-add { grid-template-columns: 1fr 1fr; } }
+
+/* 10-band graphic EQ */
+.graphic { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.graphic-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.graphic-bands { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.gband { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.gband input[type=range] { writing-mode: vertical-lr; direction: rtl; height: 110px; width: 22px; accent-color: var(--accent-strong); }
+.gband strong { color: var(--text); font-weight: 500; font-size: 11px; min-height: 14px; }
+.target-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 10px; }
+.target-row select { width: auto; }

@@ -9,6 +9,8 @@
 | ![Speaker setup](docs/screenshots/02-speaker-setup.png) | ![Equalizer](docs/screenshots/04-equalizer.png) |
 | **Routing** | **Route only selected apps** |
 | ![Routing](docs/screenshots/01-routing.png) | ![Apps](docs/screenshots/03-apps.png) |
+| **Sound: listening modes, live spectrum, tone** | |
+| ![Sound](docs/screenshots/05-sound.png) | |
 
 ## What works
 
@@ -70,13 +72,16 @@ Spatial mode changes only what each speaker plays. Delay, gain, level and alignm
 - **Speaker setup:** presets, the room map with 7.1 and 8D, and **Calibrate with a microphone**. Put a microphone at your seat, keep the room quiet, and press Calibrate. SyncSound plays clicks through each playing output in turn (about 6 s each) at that output's own gain. It finds when each output reaches the microphone and sets delays so all of them arrive together, with the smallest delay at 0. It needs at least two playing, unmuted outputs; outputs it can't hear clearly keep their delay. On the test setup it set the Realtek speaker to 255 ms behind the Bluetooth iOX 2; the manual measurement was 254 ms.
 - **Apps:** route only the apps you pick (up to 8) instead of all Windows audio. Each app is captured with Windows process loopback, and several apps are mixed on a shared timeline. Apps are remembered by executable name and reconnect when they restart. Windows still plays those apps on their own output, so to hear them only through SyncSound, set the app's output to a device you don't listen to in Windows' Volume mixer.
 - **Sound:** fuller sound on the speakers you already own.
+  - **Listening modes:** Music, Movie, Game and Voice set the tone controls in one click. **Switch mode by app** picks a mode automatically while a chosen app (Spotify, a game…) is playing.
+  - **Live spectrum:** octave-band levels of what each speaker actually plays, after every effect.
+  - **Width** spreads close-together speakers or narrows toward mono; **De-harsh** turns down 2–6 kHz only while it is loud.
   - **Bass routing:** mark small speakers *Small speaker* and a bigger one *Subwoofer* or *Full range*; a Linkwitz-Riley crossover (60–150 Hz) sends the deep bass only where it can be played.
   - **Virtual bass:** adds harmonics of the missing bass so a small speaker still sounds like it has low notes.
   - **Tilt** (warm ↔ bright) and **Loudness**, which restores the bass and treble the ear loses at low volume.
   - **Even out volume:** slow automatic level, up to ±12 dB.
   - **Night mode:** compression that lifts dialogue and holds back explosions.
   - **Match speaker levels:** Calibrate delays also measures each speaker's level at your seat and turns the louder ones down.
-- **Equalizer:** per output, low cut (40–150 Hz) for small speakers and bass (100 Hz), mid (1 kHz) and treble (8 kHz), each ±12 dB, with presets and a response curve. Boosts lower the level by the same amount so they can't clip.
+- **Equalizer:** per output, low cut (40–150 Hz) for small speakers, bass (100 Hz), mid (1 kHz) and treble (8 kHz), plus a 10-band graphic EQ (31.5 Hz–16 kHz), each ±12 dB, with presets and a response curve. Room correction aims for a **Warm** (default) or **Flat** target; switching target re-aims the last measurement without measuring again. Boosts lower the level by the same amount so they can't clip.
 
 ## Requirements (Windows 11 x64)
 

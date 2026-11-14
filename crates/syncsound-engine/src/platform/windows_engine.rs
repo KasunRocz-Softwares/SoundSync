@@ -12,7 +12,8 @@ use crate::calibration::{
 };
 use crate::capture::AudioApp;
 use crate::capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState, EndpointState};
-use crate::enhance::{self, SoundSettings};
+use crate::enhance::{self, AppMode, ListeningMode, SoundSettings};
+use crate::routing::OutputSpectrum;
 use crate::eq::{design, EqSettings};
 use crate::mixer::TimelineMixer;
 use crate::output_state::{OutputLifecycle, OutputLifecycleState};
@@ -83,6 +84,9 @@ enum Command {
     SetSpatial(SpatialConfig, Reply<()>),
     SetEq(String, EqSettings, Reply<()>),
     SetSound(SoundSettings, Reply<()>),
+    ApplyListeningMode(ListeningMode, Reply<()>),
+    SetAppModes(Vec<AppMode>, Reply<()>),
+    Spectrum(Reply<Vec<OutputSpectrum>>),
     ListApps(Reply<Vec<AudioApp>>),
     ListMics(Reply<Vec<Microphone>>),
     Calibrate(String, Reply<CalibrationReport>),
@@ -248,6 +252,19 @@ impl AudioEngine {
     pub fn set_sound(&self, settings: SoundSettings) -> Result<(), EngineError> {
         self.call(|r| Command::SetSound(settings, r))
     }
+    /// Sets the tone controls to a listening mode's values.
+    pub fn apply_listening_mode(&self, mode: ListeningMode) -> Result<(), EngineError> {
+        self.call(|r| Command::ApplyListeningMode(mode, r))
+    }
+    /// Apps that switch the listening mode while they play.
+    pub fn set_app_modes(&self, modes: Vec<AppMode>) -> Result<(), EngineError> {
+        self.call(|r| Command::SetAppModes(modes, r))
+    }
+    /// Octave-band levels of what each enabled output plays. Metering runs
+    /// only while this is called (stops ~2 s after the last call).
+    pub fn spectrum(&self) -> Result<Vec<OutputSpectrum>, EngineError> {
+        self.call(Command::Spectrum)
+    }
     pub fn set_distance_compensation(&self, enabled: bool) -> Result<(), EngineError> {
         self.call(|r| Command::SetCompensation(enabled, r))
     }
@@ -329,6 +346,11 @@ struct Core {
     spatial_config: SpatialConfig,
     spatial: Arc<SpatialShared>,
     sound: SoundSettings,
+    app_modes: Vec<AppMode>,
+    /// The app (and its mode) currently overriding the tone, if any.
+    auto_mode: Option<AppMode>,
+    last_mode_check: Instant,
+    last_spectrum: Option<Instant>,
     running: bool,
     endpoints: Vec<AudioEndpoint>,
     outputs: BTreeMap<String, OutputSlot>,
@@ -366,6 +388,10 @@ impl Core {
             spatial_config: SpatialConfig::default(),
             spatial: Arc::new(SpatialShared::default()),
             sound: SoundSettings::default(),
+            app_modes: Vec::new(),
+            auto_mode: None,
+            last_mode_check: now,
+            last_spectrum: None,
             running: false,
             endpoints,
             outputs: BTreeMap::new(),
@@ -588,8 +614,43 @@ impl Core {
                 let _ = reply.send(Ok(()));
             }
             Command::SetSound(settings, reply) => {
+                if settings.room_target != self.sound.room_target {
+                    // Re-aim stored room measurements at the new target.
+                    for slot in self.outputs.values_mut() {
+                        let eq = &mut slot.config.eq;
+                        if eq.room_response.iter().any(Option::is_some) {
+                            eq.correction_db = room::correction(&eq.room_response, settings.room_target);
+                        }
+                    }
+                }
                 self.sound = settings;
                 let _ = reply.send(Ok(()));
+            }
+            Command::ApplyListeningMode(mode, reply) => {
+                self.sound = mode.apply(self.sound);
+                let _ = reply.send(Ok(()));
+            }
+            Command::SetAppModes(modes, reply) => {
+                self.app_modes = modes;
+                self.last_mode_check = Instant::now() - Duration::from_secs(10);
+                self.service_app_modes();
+                let _ = reply.send(Ok(()));
+            }
+            Command::Spectrum(reply) => {
+                self.last_spectrum = Some(Instant::now());
+                let spectra = self
+                    .outputs
+                    .values()
+                    .filter(|s| s.config.enabled)
+                    .map(|s| {
+                        s.controls.spectrum.watching.store(true, Ordering::Relaxed);
+                        OutputSpectrum {
+                            endpoint_id: s.config.endpoint_id.clone(),
+                            levels_db: s.controls.spectrum.levels_db(),
+                        }
+                    })
+                    .collect();
+                let _ = reply.send(Ok(spectra));
             }
             Command::SetCompensation(enabled, reply) => {
                 self.distance_compensation = enabled;
@@ -617,6 +678,54 @@ impl Core {
         }
     }
 
+    /// The user's sound settings with the playing app's listening mode on top.
+    fn effective_sound(&self) -> SoundSettings {
+        self.auto_mode
+            .as_ref()
+            .map_or(self.sound, |a| a.mode.apply(self.sound))
+    }
+
+    /// Every 3 s: switch to the listening mode of the first listed app that is
+    /// playing sound, or back to the user's own settings.
+    fn service_app_modes(&mut self) {
+        if self.last_mode_check.elapsed() < Duration::from_secs(3) {
+            return;
+        }
+        self.last_mode_check = Instant::now();
+        let next = if self.app_modes.is_empty() {
+            None
+        } else {
+            match list_audio_apps() {
+                Ok(apps) => self
+                    .app_modes
+                    .iter()
+                    .find(|m| {
+                        apps.iter()
+                            .any(|a| a.active && a.exe.eq_ignore_ascii_case(&m.exe))
+                    })
+                    .cloned(),
+                Err(_) => self.auto_mode.clone(),
+            }
+        };
+        if next != self.auto_mode {
+            self.auto_mode = next;
+            self.recompute_placement();
+        }
+    }
+
+    /// Stops spectrum metering on the render threads once nobody is watching.
+    fn service_spectrum(&mut self) {
+        if self
+            .last_spectrum
+            .is_some_and(|t| t.elapsed() > Duration::from_secs(2))
+        {
+            self.last_spectrum = None;
+            for slot in self.outputs.values() {
+                slot.controls.spectrum.watching.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+
     /// Pushes role, trim and distance compensation into every output's atomics.
     fn recompute_placement(&mut self) {
         let configs: Vec<OutputConfig> = self.outputs.values().map(|s| s.config.clone()).collect();
@@ -626,6 +735,7 @@ impl Core {
             self.format.sample_rate,
         );
         let rate = self.format.sample_rate;
+        let sound = self.effective_sound();
         for (slot, placement) in self.outputs.values_mut().zip(placements) {
             slot.controls.set_role(slot.config.role);
             if slot.published_eq != Some(slot.config.eq) {
@@ -634,15 +744,15 @@ impl Core {
                     .publish(&design(&slot.config.eq, rate), slot.config.eq.headroom());
                 slot.published_eq = Some(slot.config.eq);
             }
-            if slot.published_enhance != Some((slot.config.eq, self.sound)) {
+            if slot.published_enhance != Some((slot.config.eq, sound)) {
                 let eq = slot.config.eq;
                 slot.controls.enhance.publish(&enhance::design(
                     eq.bass_role,
                     eq.virtual_bass,
-                    &self.sound,
+                    &sound,
                     rate,
                 ));
-                slot.published_enhance = Some((eq, self.sound));
+                slot.published_enhance = Some((eq, sound));
             }
             slot.controls.set_trim(placement.level);
             slot.controls
@@ -914,6 +1024,10 @@ impl Core {
     fn tick(&mut self) {
         if self.catalog.changed.load(Ordering::Acquire) {
             self.refresh_endpoints();
+        }
+        self.service_spectrum();
+        if self.running {
+            self.service_app_modes();
         }
         if !self.running {
             self.publish(false);
@@ -1211,12 +1325,18 @@ impl Core {
                 room::LEAD_IN_S + room::SEGMENT_S * k as f64,
                 room::SEGMENT_S,
             );
-            let result = window.map(|w| room::analyze(w, noise, rate));
+            let target = self.sound.room_target;
+            let result = window.map(|w| room::analyze(w, noise, rate, target));
             let usable = result.as_ref().is_some_and(|r| r.snr_db >= 20.0);
             if usable {
                 if let (Some(slot), Some(r)) = (self.outputs.get_mut(id), &result) {
                     slot.config.eq.room_correction = true;
                     slot.config.eq.correction_db = r.correction_db;
+                    for (stored, measured) in
+                        slot.config.eq.room_response.iter_mut().zip(&r.response_db)
+                    {
+                        *stored = *measured;
+                    }
                     applied += 1;
                 }
             }
@@ -1429,6 +1549,9 @@ impl Core {
             distance_compensation: self.distance_compensation,
             spatial: self.spatial_config,
             sound: self.sound,
+            listening_mode: ListeningMode::matching(&self.sound),
+            app_modes: self.app_modes.clone(),
+            auto_mode: self.auto_mode.clone(),
             app_sources,
             calibration: self.calibration.as_ref().map(|run| {
                 let rate = f64::from(self.format.sample_rate);

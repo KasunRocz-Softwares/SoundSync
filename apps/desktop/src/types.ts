@@ -46,12 +46,18 @@ export type EqSettings = {
   enabled: boolean; low_cut_hz: number; bass_db: number; mid_db: number; treble_db: number;
   room_correction: boolean; correction_db: number[];
   bass_role: BassRole; virtual_bass: number;
+  graphic_db: number[]; room_response: (number | null)[];
 };
 export type BassRole = 'full' | 'satellite' | 'subwoofer';
+export type RoomTarget = 'flat' | 'warm';
 export type SoundSettings = {
   crossover_hz: number; tilt_db: number; loudness: number;
   normalize: boolean; night_mode: boolean; match_levels: boolean;
+  width: number; deharsh: number; room_target: RoomTarget;
 };
+export type ListeningMode = 'custom' | 'music' | 'movie' | 'game' | 'voice';
+export type AppMode = { exe: string; mode: ListeningMode };
+export type OutputSpectrum = { endpoint_id: string; levels_db: number[] };
 export const CROSSOVER_OPTIONS = [60, 80, 100, 120, 150];
 export const ROOM_BANDS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 export type RoomResult = { response_db: (number | null)[]; correction_db: number[]; snr_db: number };
@@ -116,6 +122,9 @@ export type EngineSnapshot = {
   distance_compensation: boolean;
   spatial: SpatialConfig;
   sound: SoundSettings;
+  listening_mode: ListeningMode;
+  app_modes: AppMode[];
+  auto_mode: AppMode | null;
   app_sources: AppSourceStatus[];
   calibration: CalibrationProgress | null;
   endpoints: AudioEndpoint[];
