@@ -3,6 +3,7 @@
 //! encoding. The Windows worker calls `RenderPipeline::render` from its event loop;
 //! that call never allocates, locks, logs, blocks, or performs I/O.
 use crate::dsp::DspError;
+use crate::enhance::{EnhanceProcessor, EnhanceShared};
 use crate::eq::{EqProcessor, EqShared};
 use crate::spatial::{virtual_channels, GainMatrix, LowPass, SpatialShared, MAX_VIRTUAL};
 use crate::{PcmConsumer, PcmFormat};
@@ -157,6 +158,8 @@ pub struct OutputControls {
     subwoofer: AtomicBool,
     /// Equalizer coefficients published by the control thread.
     pub eq: EqShared,
+    /// Bass routing, virtual bass, tone and dynamics published by the control thread.
+    pub enhance: EnhanceShared,
 }
 
 impl OutputControls {
@@ -174,6 +177,7 @@ impl OutputControls {
             spatial_slot: AtomicU8::new(u8::MAX),
             subwoofer: AtomicBool::new(false),
             eq: EqShared::new(),
+            enhance: EnhanceShared::default(),
         }
     }
     pub fn spatial_slot(&self) -> Option<usize> {
@@ -360,6 +364,7 @@ pub struct RenderPipeline {
     lfe: LowPass,
     lfe_coefficient: f32,
     eq: EqProcessor,
+    enhance: EnhanceProcessor,
 }
 
 impl RenderPipeline {
@@ -408,6 +413,7 @@ impl RenderPipeline {
             lfe: LowPass::default(),
             lfe_coefficient: LowPass::coefficient(format.sample_rate),
             eq: EqProcessor::default(),
+            enhance: EnhanceProcessor::new(format.sample_rate),
         })
     }
 
@@ -618,6 +624,7 @@ impl RenderPipeline {
         };
         let mut virtual_frame = [0.0f32; MAX_VIRTUAL];
         self.eq.refresh(&self.controls.eq);
+        self.enhance.refresh(&self.controls.enhance);
         let gain_step = if frames_out > 0 {
             (target_gain - self.gain) / frames_out as f32
         } else {
@@ -646,7 +653,12 @@ impl RenderPipeline {
             for c in 0..ch {
                 let left = self.ring[a * ch + c];
                 let right = self.ring[b * ch + c];
-                out[c] = (left + (right - left) * fraction) * self.gain;
+                out[c] = left + (right - left) * fraction;
+            }
+            // Normalize / night mode act on the source, before this output's volume.
+            self.enhance.dynamics(out);
+            for s in out.iter_mut() {
+                *s *= self.gain;
             }
             match &spatial {
                 Some((_, _, _, true)) => {
@@ -671,6 +683,7 @@ impl RenderPipeline {
                 }
                 None => role.apply(out),
             }
+            self.enhance.process(out);
             self.eq.process(out);
             self.phase += ratio;
             while self.phase >= 1.0 && self.len > 0 {

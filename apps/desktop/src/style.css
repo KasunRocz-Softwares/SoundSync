@@ -284,3 +284,11 @@ aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .room-row .bands span { background: #111925; border-radius: 6px; padding: 2px 6px; font-variant-numeric: tabular-nums; }
 .room-row .bands .cut { color: #9cc3ff; }
 .room-row .bands .boost { color: #f2c46d; }
+
+/* Sound */
+.bass-row .device-top { flex-wrap: wrap; }
+.bass-row .segmented button { padding: 6px 11px; font-size: 12.5px; }
+.bass-vb { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.band.crossover { grid-template-columns: auto 110px; gap: 10px; }
+.band.crossover select { width: 100%; }
+.sound-controls .band, .bass-vb .band { grid-template-columns: 90px 1fr 90px; }

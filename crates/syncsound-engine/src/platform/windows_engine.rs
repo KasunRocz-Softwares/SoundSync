@@ -7,14 +7,18 @@ use super::windows_apps::list_audio_apps;
 use super::windows_mic::{list_microphones, MicRecorder, Microphone};
 use super::windows_render::{RenderWorker, WorkerPoll};
 use crate::calibration::{
-    analyze_output, click_sample, soloed_output, solve_delays, total_frames, CalibratedOutput,
+    analyze_output, click_sample, soloed_output, solve_delays, solve_levels, total_frames,
+    CalibratedOutput,
 };
 use crate::capture::AudioApp;
 use crate::capture::{AudioEndpoint, CaptureConfig, CaptureSource, CaptureState, EndpointState};
+use crate::enhance::{self, SoundSettings};
 use crate::eq::{design, EqSettings};
 use crate::mixer::TimelineMixer;
 use crate::output_state::{OutputLifecycle, OutputLifecycleState};
-use crate::placement::{apply_preset, compute_placement, SoundPreset, SpeakerPosition};
+use crate::placement::{
+    apply_preset, compute_placement, SoundPreset, SpeakerPosition, MIN_TRIM_DB,
+};
 use crate::render::{
     ms_to_frames, AudioMode, ChannelRole, OutputControls, OutputMetrics, RenderPipeline,
     MAX_ENABLED_OUTPUTS,
@@ -78,6 +82,7 @@ enum Command {
     SetSubwoofer(String, bool, Reply<()>),
     SetSpatial(SpatialConfig, Reply<()>),
     SetEq(String, EqSettings, Reply<()>),
+    SetSound(SoundSettings, Reply<()>),
     ListApps(Reply<Vec<AudioApp>>),
     ListMics(Reply<Vec<Microphone>>),
     Calibrate(String, Reply<CalibrationReport>),
@@ -239,6 +244,10 @@ impl AudioEngine {
     pub fn set_spatial(&self, config: SpatialConfig) -> Result<(), EngineError> {
         self.call(|r| Command::SetSpatial(config, r))
     }
+    /// Tilt, loudness, crossover, normalize, night mode and level matching.
+    pub fn set_sound(&self, settings: SoundSettings) -> Result<(), EngineError> {
+        self.call(|r| Command::SetSound(settings, r))
+    }
     pub fn set_distance_compensation(&self, enabled: bool) -> Result<(), EngineError> {
         self.call(|r| Command::SetCompensation(enabled, r))
     }
@@ -266,6 +275,7 @@ struct OutputSlot {
     producer: Option<PcmProducer>,
     worker: Option<RenderWorker>,
     published_eq: Option<EqSettings>,
+    published_enhance: Option<(EqSettings, SoundSettings)>,
 }
 
 struct CalibrationRun {
@@ -318,6 +328,7 @@ struct Core {
     distance_compensation: bool,
     spatial_config: SpatialConfig,
     spatial: Arc<SpatialShared>,
+    sound: SoundSettings,
     running: bool,
     endpoints: Vec<AudioEndpoint>,
     outputs: BTreeMap<String, OutputSlot>,
@@ -354,6 +365,7 @@ impl Core {
             distance_compensation: true,
             spatial_config: SpatialConfig::default(),
             spatial: Arc::new(SpatialShared::default()),
+            sound: SoundSettings::default(),
             running: false,
             endpoints,
             outputs: BTreeMap::new(),
@@ -443,6 +455,7 @@ impl Core {
                     producer: None,
                     worker: None,
                     published_eq: None,
+                    published_enhance: None,
                 },
             );
         }
@@ -574,6 +587,10 @@ impl Core {
                 self.spatial_config = config;
                 let _ = reply.send(Ok(()));
             }
+            Command::SetSound(settings, reply) => {
+                self.sound = settings;
+                let _ = reply.send(Ok(()));
+            }
             Command::SetCompensation(enabled, reply) => {
                 self.distance_compensation = enabled;
                 let _ = reply.send(Ok(()));
@@ -616,6 +633,16 @@ impl Core {
                     .eq
                     .publish(&design(&slot.config.eq, rate), slot.config.eq.headroom());
                 slot.published_eq = Some(slot.config.eq);
+            }
+            if slot.published_enhance != Some((slot.config.eq, self.sound)) {
+                let eq = slot.config.eq;
+                slot.controls.enhance.publish(&enhance::design(
+                    eq.bass_role,
+                    eq.virtual_bass,
+                    &self.sound,
+                    rate,
+                ));
+                slot.published_enhance = Some((eq, self.sound));
             }
             slot.controls.set_trim(placement.level);
             slot.controls
@@ -1247,6 +1274,22 @@ impl Core {
                 }
             }
         }
+        let old_trims: Vec<f32> = order
+            .iter()
+            .map(|id| self.outputs.get(id).map_or(0.0, |s| s.config.trim_db))
+            .collect();
+        let new_trims = if applied && self.sound.match_levels {
+            solve_levels(&arrivals, &old_trims, MIN_TRIM_DB)
+        } else {
+            None
+        };
+        if let Some(trims) = &new_trims {
+            for (id, trim) in order.iter().zip(trims) {
+                if let Some(slot) = self.outputs.get_mut(id) {
+                    slot.config.trim_db = *trim;
+                }
+            }
+        }
         let outputs = order
             .iter()
             .enumerate()
@@ -1258,9 +1301,13 @@ impl Core {
                 relative_ms: relative[k],
                 old_delay_ms: current[k],
                 new_delay_ms: if applied { delays[k] } else { current[k] },
+                old_trim_db: old_trims[k],
+                new_trim_db: new_trims.as_ref().map_or(old_trims[k], |t| t[k]),
             })
             .collect();
-        let message = if applied {
+        let message = if applied && new_trims.is_some() {
+            format!("Aligned and level-matched {detected} outputs using {mic_name}.")
+        } else if applied {
             format!("Aligned {detected} outputs using {mic_name}.")
         } else {
             format!(
@@ -1381,6 +1428,7 @@ impl Core {
             outputs,
             distance_compensation: self.distance_compensation,
             spatial: self.spatial_config,
+            sound: self.sound,
             app_sources,
             calibration: self.calibration.as_ref().map(|run| {
                 let rate = f64::from(self.format.sample_rate);

@@ -33,6 +33,7 @@
     "allow-set-device-subwoofer",
     "allow-set-spatial",
     "allow-set-device-eq",
+    "allow-set-sound",
     "allow-list-audio-apps",
     "allow-select-app-sources",
     "allow-list-microphones",

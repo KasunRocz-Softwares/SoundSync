@@ -45,6 +45,7 @@ pub(crate) fn apply_profile(
         .set_distance_compensation(plan.distance_compensation)
         .map_err(engine_error)?;
     engine.set_spatial(plan.spatial).map_err(engine_error)?;
+    engine.set_sound(plan.sound).map_err(engine_error)?;
     if let Some(source) = plan.source.clone() {
         engine.set_source(source).map_err(engine_error)?;
     }
@@ -410,6 +411,15 @@ async fn set_device_eq(id: String, eq: EqSettings, state: State<'_, AppState>) -
     state.engine.set_eq(id, eq).map_err(engine_error)
 }
 
+#[tauri::command]
+async fn set_sound(
+    settings: syncsound_engine::enhance::SoundSettings,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    settings.validate()?;
+    state.engine.set_sound(settings).map_err(engine_error)
+}
+
 #[derive(Serialize)]
 struct SyncMetrics {
     running: bool,
@@ -602,6 +612,7 @@ pub fn run() {
             set_device_subwoofer,
             set_spatial,
             set_device_eq,
+            set_sound,
             list_audio_apps,
             select_app_sources,
             list_microphones,

@@ -39,6 +39,7 @@ export function CalibrationCard({ snapshot, onDone }: { snapshot: EngineSnapshot
       .finally(() => { setBusy(false); onDone(); });
   };
 
+  const levelled = report?.outputs.some(o => o.new_trim_db !== o.old_trim_db) ?? false;
   return <section className="panel">
     <div className="setup-head">
       <h2><Wand2 size={16} /> Calibrate with a microphone</h2>
@@ -79,12 +80,13 @@ export function CalibrationCard({ snapshot, onDone }: { snapshot: EngineSnapshot
     {report && <div className="calib-report">
       <p className={report.applied ? 'field-ok' : 'field-error'}>{report.message}</p>
       <table>
-        <thead><tr><th>Output</th><th>Heard</th><th>Arrives</th><th>Delay</th></tr></thead>
+        <thead><tr><th>Output</th><th>Heard</th><th>Arrives</th><th>Delay</th>{levelled && <th>Level</th>}</tr></thead>
         <tbody>{report.outputs.map(o => <tr key={o.endpoint_id}>
           <td>{o.name}</td>
           <td>{o.detected ? `Yes (${o.snr.toFixed(0)}×)` : `Too quiet (${o.snr.toFixed(1)}×)`}</td>
           <td>{o.relative_ms != null ? `${o.relative_ms >= 0 ? '+' : ''}${o.relative_ms.toFixed(0)} ms` : '—'}</td>
           <td>{o.old_delay_ms} → <strong>{o.new_delay_ms} ms</strong></td>
+          {levelled && <td>{o.old_trim_db} → <strong>{o.new_trim_db} dB</strong></td>}
         </tr>)}</tbody>
       </table>
     </div>}

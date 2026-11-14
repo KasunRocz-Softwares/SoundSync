@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpatialConfig,
   SpeakerPosition, StereoSpread, EqSettings, AudioApp, Microphone, CalibrationReport,
-  RoomReport, AppSettings, VirtualSpeakerStatus,
+  RoomReport, AppSettings, VirtualSpeakerStatus, SoundSettings,
 } from './types';
 
 export function errorMessage(error: unknown): string {
@@ -42,6 +42,7 @@ export const api = {
   spread: (id: string, spread: StereoSpread) => invoke<void>('set_device_spread', { id, spread }),
   subwoofer: (id: string, on: boolean) => invoke<void>('set_device_subwoofer', { id, on }),
   eq: (id: string, eq: EqSettings) => invoke<void>('set_device_eq', { id, eq }),
+  sound: (settings: SoundSettings) => invoke<void>('set_sound', { settings }),
   apps: () => invoke<AudioApp[]>('list_audio_apps'),
   selectApps: (exes: string[]) => invoke<void>('select_app_sources', { exes }),
   mics: () => invoke<Microphone[]>('list_microphones'),

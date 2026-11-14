@@ -2,6 +2,7 @@
 //! friendly name: missing endpoints are reported and require an explicit rebind.
 use crate::capture::{AudioEndpoint, CaptureSource};
 use crate::commands::{validate_delay, validate_volume, CommandError};
+use crate::enhance::SoundSettings;
 use crate::eq::EqSettings;
 use crate::placement::{validate_distance, validate_trim, SpeakerPosition};
 use crate::render::{AudioMode, ChannelRole, MAX_ENABLED_OUTPUTS};
@@ -78,6 +79,8 @@ pub struct Profile {
     pub distance_compensation: bool,
     #[serde(default)]
     pub spatial: SpatialConfig,
+    #[serde(default)]
+    pub sound: SoundSettings,
 }
 
 impl ProfileOutput {
@@ -128,6 +131,7 @@ pub struct ProfileApplyPlan {
     pub missing: Vec<MissingOutput>,
     pub distance_compensation: bool,
     pub spatial: SpatialConfig,
+    pub sound: SoundSettings,
 }
 
 pub fn validate_name(name: &str) -> Result<(), CommandError> {
@@ -179,6 +183,7 @@ impl Profile {
                 .collect(),
             distance_compensation: snapshot.distance_compensation,
             spatial: snapshot.spatial,
+            sound: snapshot.sound,
         };
         profile.validate()?;
         Ok(profile)
@@ -193,6 +198,7 @@ impl Profile {
             ));
         }
         validate_spatial(&self.spatial)?;
+        self.sound.validate()?;
         if self.outputs.len() > MAX_PROFILE_OUTPUTS {
             return Err(CommandError::new(
                 "invalid_profile",
@@ -314,6 +320,7 @@ impl Profile {
             missing,
             distance_compensation: self.distance_compensation,
             spatial: self.spatial,
+            sound: self.sound,
         }
     }
 
@@ -441,6 +448,7 @@ mod tests {
             source: ProfileSource::SystemExcludingSelf,
             distance_compensation: true,
             spatial: SpatialConfig::default(),
+            sound: SoundSettings::default(),
             outputs: vec![
                 ProfileOutput {
                     endpoint_id: "id-a".into(),

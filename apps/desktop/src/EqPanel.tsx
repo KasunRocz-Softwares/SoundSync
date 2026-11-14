@@ -3,7 +3,7 @@ import { api } from './api';
 import { ROOM_BANDS, type EngineSnapshot, type EqSettings, type OutputStatus } from './types';
 
 const LOW_CUTS = [0, 40, 60, 80, 100, 120, 150];
-const PRESETS: { label: string; eq: Omit<EqSettings, 'enabled' | 'room_correction' | 'correction_db'> }[] = [
+const PRESETS: { label: string; eq: Omit<EqSettings, 'enabled' | 'room_correction' | 'correction_db' | 'bass_role' | 'virtual_bass'> }[] = [
   { label: 'Flat', eq: { low_cut_hz: 0, bass_db: 0, mid_db: 0, treble_db: 0 } },
   { label: 'Bass boost', eq: { low_cut_hz: 0, bass_db: 6, mid_db: 0, treble_db: 1 } },
   { label: 'Small speaker', eq: { low_cut_hz: 100, bass_db: -2, mid_db: 1, treble_db: 0 } },

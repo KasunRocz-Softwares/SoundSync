@@ -39,6 +39,12 @@ pub struct EqSettings {
     /// Per octave band, 31.5 Hz … 16 kHz (see `room::BANDS`).
     #[serde(default)]
     pub correction_db: [f32; 10],
+    /// Bass routing: full range, satellite (bass removed) or subwoofer (bass only).
+    #[serde(default)]
+    pub bass_role: crate::enhance::BassRole,
+    /// Virtual bass amount 0…1: harmonics that make missing bass audible.
+    #[serde(default)]
+    pub virtual_bass: f32,
 }
 
 impl EqSettings {
@@ -65,6 +71,12 @@ impl EqSettings {
             return Err(CommandError::new(
                 "invalid_eq",
                 "Room correction bands must be between -12 and +6 dB",
+            ));
+        }
+        if !self.virtual_bass.is_finite() || !(0.0..=1.0).contains(&self.virtual_bass) {
+            return Err(CommandError::new(
+                "invalid_eq",
+                "Virtual bass must be between 0 and 100%",
             ));
         }
         Ok(())
@@ -126,6 +138,32 @@ impl Biquad {
             -2.0 * c,
             1.0 - alpha,
         )
+    }
+
+    /// Butterworth (Q = 1/√2) low-pass; two in series form a Linkwitz-Riley crossover.
+    pub fn low_pass(freq: f64, rate: f64) -> Biquad {
+        let w = 2.0 * PI * freq / rate;
+        let alpha = w.sin() / (2.0 * std::f64::consts::FRAC_1_SQRT_2);
+        let c = w.cos();
+        Self::normalize(
+            (1.0 - c) / 2.0,
+            1.0 - c,
+            (1.0 - c) / 2.0,
+            1.0 + alpha,
+            -2.0 * c,
+            1.0 - alpha,
+        )
+    }
+
+    /// One sample through this biquad (transposed direct form II).
+    #[inline]
+    pub fn tick(&self, state: &mut (f32, f32), x: f32) -> f32 {
+        let y = self.b0 * x + state.0;
+        *state = (
+            self.b1 * x - self.a1 * y + state.1,
+            self.b2 * x - self.a2 * y,
+        );
+        y
     }
 
     pub fn low_shelf(freq: f64, rate: f64, db: f64) -> Biquad {

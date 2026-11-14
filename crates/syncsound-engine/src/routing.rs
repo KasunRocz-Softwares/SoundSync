@@ -151,6 +151,8 @@ pub struct EngineSnapshot {
     pub outputs: Vec<OutputStatus>,
     pub distance_compensation: bool,
     pub spatial: SpatialConfig,
+    /// Tilt, loudness, crossover, normalize, night mode.
+    pub sound: crate::enhance::SoundSettings,
     /// Per-app routing status (source = Apps).
     pub app_sources: Vec<AppSourceStatus>,
     /// Present while a microphone calibration is running.
@@ -171,6 +173,7 @@ impl EngineSnapshot {
             outputs: Vec::new(),
             distance_compensation: true,
             spatial: SpatialConfig::default(),
+            sound: crate::enhance::SoundSettings::default(),
             app_sources: Vec::new(),
             calibration: None,
             endpoints: Vec::new(),
