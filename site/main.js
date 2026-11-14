@@ -20,10 +20,20 @@
 
   // Totals: installer downloads from every GitHub release (the in-app updater's
   // downloads included), and site visits from a public counter.
+  // Shown publicly from 1,000 downloads; before that only with ?stats in the URL.
+  const PUBLIC_FROM = 1000;
+  const owner = new URLSearchParams(location.search).has('stats');
   const fmt = n => Number(n).toLocaleString('en-US');
+  let reveal = owner;
+  const pending = {};
   const show = (id, value) => {
     document.getElementById(id).textContent = fmt(value);
-    document.getElementById(`${id}-wrap`).hidden = false;
+    pending[id] = true;
+    if (reveal) document.getElementById(`${id}-wrap`).hidden = false;
+  };
+  const revealAll = () => {
+    reveal = true;
+    Object.keys(pending).forEach(id => { document.getElementById(`${id}-wrap`).hidden = false; });
   };
   fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`)
     .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
@@ -33,6 +43,7 @@
         .filter(a => /\.(exe|msi)$/i.test(a.name))
         .reduce((sum, a) => sum + (a.download_count || 0), 0);
       show('stat-downloads', total);
+      if (total >= PUBLIC_FROM) revealAll();
     })
     .catch(() => { /* leave hidden */ });
 
