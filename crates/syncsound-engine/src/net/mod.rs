@@ -3,7 +3,9 @@
 
 pub mod access;
 pub mod convert;
+pub mod http;
 pub mod link;
+pub mod server;
 pub mod worker;
 
 use serde::{Deserialize, Serialize};
