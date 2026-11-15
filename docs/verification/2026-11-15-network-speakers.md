@@ -1,6 +1,6 @@
 # Network speakers verification: 2026-11-15
 
-Feature: Network speakers (a LAN web page that plays the PC audio on phones, PCs and TVs). Branch `main`, commits 9054ac7..0198381. Automated results are in the task report; this file tracks the real-device matrix.
+Feature: Network speakers (a LAN web page that plays the PC audio on phones, PCs and TVs). Branch `main`, commits 9054ac7..0198381. Automated results: `npm run build` passed; `npm run test:page` 13 of 13 passed; `cargo test --workspace` passed (engine lib 165 passed, 0 failed, with the installed app holding port 4877). This file tracks the real-device matrix.
 
 Rows marked **Not tested yet** have no result. Nothing here is estimated.
 

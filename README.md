@@ -41,7 +41,7 @@ Play your PC audio on phones, tablets, other PCs and smart-TV browsers on the sa
 
 **How to join**
 
-1. Open **Settings > Routing** and turn on the **Network speakers** card. It is off by default. SyncSound starts a server on port 4877 (it falls back up to 4887 if that is taken) and shows a QR code and an address, for example `http://192.168.1.90:4877`.
+1. Open the **Routing** tab and turn on the **Network speakers** card. It is off by default. SyncSound starts a server on port 4877 (it falls back up to 4887 if that is taken) and shows a QR code and an address, for example `http://192.168.1.90:4877`.
 2. **QR:** scan the code with the phone camera. The device joins immediately. The code carries a one-time token that expires after 10 minutes.
 3. **Typed address:** open the address in any browser on the same Wi-Fi, for example on a TV. The PC shows an **Allow / Deny** request and the device joins once you allow it.
 4. Tap **Tap to play** on the device. It then appears as an output on the Routing tab, with volume, mute, delay, position and EQ like any other speaker.
@@ -49,7 +49,7 @@ Play your PC audio on phones, tablets, other PCs and smart-TV browsers on the sa
 
 **Latency.** The page targets a 150 ms buffer. If the Wi-Fi is weak and the sound breaks up, turn on **Weak Wi-Fi** on the device page for a 300 ms buffer. Calibrate measures the real delay of each device and sets the delay for you.
 
-**iPhone.** Keep the page open with the screen on. Safari pauses web audio when the screen locks, and a page served over plain HTTP cannot prevent that.
+**iPhone.** Keep the page open with the screen on. Safari pauses web audio when the screen locks, and a page served over plain HTTP cannot reliably prevent that.
 
 **Privacy.** Off by default. Only private (LAN) addresses are accepted, never internet addresses. The server stops when you turn the card off, and everyone is disconnected.
 

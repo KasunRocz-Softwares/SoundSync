@@ -959,10 +959,21 @@ mod tests {
 
     #[test]
     fn falls_back_to_next_free_port() {
-        let _busy = TcpListener::bind(("0.0.0.0", 4877)).unwrap();
-        let server = NetworkServer::start(vec![], 4877).unwrap();
-        assert_eq!(server.port(), 4878);
-        assert!(server.url().ends_with(":4878"));
+        // Find a port P whose P+1 is also free, hold P busy, and expect P+1.
+        let (busy, p) = (0..50)
+            .find_map(|_| {
+                let l = TcpListener::bind(("0.0.0.0", 0)).ok()?;
+                let p = l.local_addr().ok()?.port();
+                let next = p.checked_add(1)?;
+                // Probe P+1 then release it so the server can take it.
+                drop(TcpListener::bind(("0.0.0.0", next)).ok()?);
+                Some((l, p))
+            })
+            .expect("a free pair of adjacent ports");
+        let server = NetworkServer::start(vec![], p).unwrap();
+        assert_eq!(server.port(), p + 1);
+        assert!(server.url().ends_with(&format!(":{}", p + 1)));
+        drop(busy);
     }
 
     #[test]
