@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SyncSound: play PC audio on multiple speakers and Bluetooth at once, in sync (free for Windows)</title>
-  <meta name="description" content="Free, open-source Windows 11 app that plays your PC audio on wired, USB, HDMI and Bluetooth speakers at once, measured and aligned with your microphone.">
+  <meta name="description" content="Free, open-source Windows 11 app that plays your PC audio on wired, USB, HDMI and Bluetooth speakers, phones and TVs at once, measured and aligned with your microphone.">
   <link rel="canonical" href="https://kasunrocz-softwares.github.io/SoundSync/">
   <meta name="robots" content="index, follow">
   <script type="application/ld+json">
@@ -62,7 +62,7 @@
         <div class="hero-copy">
           <p class="eyebrow"><span class="dot"></span>Free and open source for Windows 11</p>
           <h1>Every speaker you own. <em>One moment.</em></h1>
-          <p class="lede">SyncSound plays your PC audio on wired, USB, HDMI and Bluetooth outputs at the same time. Your microphone measures how late each one is, and SyncSound lines them up so the room sounds like one system.</p>
+          <p class="lede">SyncSound plays your PC audio on wired, USB, HDMI and Bluetooth outputs at the same time, and on phones and TVs on your Wi-Fi. Your microphone measures how late each one is, and SyncSound lines them up so the room sounds like one system.</p>
           <div class="cta-row">
             <a class="btn btn-primary" id="download" href="https://github.com/KasunRocz-Softwares/SoundSync/releases/latest" rel="noopener">
               <i class="ph-bold ph-download-simple"></i><span>Download for Windows</span>
@@ -125,6 +125,14 @@
           <p>No extra hardware, no account, no cloud. Everything runs on your PC.</p>
         </div>
         <div class="bento">
+          <article class="cell cell-net reveal">
+            <div class="cell-copy">
+              <i class="ph ph-device-mobile-speaker"></i>
+              <h3>Your phone is a speaker now</h3>
+              <p>Turn on Network speakers, scan the QR code with your phone and your PC audio plays there too. Phones, tablets, other PCs and smart TV browsers all work, with nothing to install. They join as outputs, so volume, delay and Calibrate work the same as for any speaker.</p>
+            </div>
+            <img src="assets/06-network.webp" width="390" height="844" loading="lazy" alt="The SyncSound page on a phone with a large Tap to play button">
+          </article>
           <article class="cell cell-wide reveal">
             <div class="cell-copy">
               <i class="ph ph-arrows-split"></i>
@@ -253,8 +261,20 @@
             <p>Yes. SyncSound is open source under the MIT licence. There's no account, no subscription and no ads.</p>
           </details>
           <details>
+            <summary>Why does my iPhone need the screen on?</summary>
+            <p>iPhone Safari pauses web audio when the screen locks, and a page served over plain HTTP can't prevent that. Keep the SyncSound page open with the screen on.</p>
+          </details>
+          <details>
+            <summary>Why does Windows ask about the firewall?</summary>
+            <p>Turning on Network speakers makes SyncSound listen on your local network so phones can connect, and Windows asks before any app does that. Choose Allow on Private networks. SyncSound only accepts devices on your home network, and it asks you before a device that typed the address can join. A phone that scanned the QR code on your PC screen joins straight away.</p>
+          </details>
+          <details>
+            <summary>My phone can't connect</summary>
+            <p>Check that the phone is on the same Wi-Fi as the PC, not a guest network, and that the router doesn't use client isolation. Then check the firewall. If Windows showed a prompt, it must be allowed on Private networks, and the network may need to be set to Private rather than Public. Third-party antivirus firewalls such as Kaspersky, Norton or ESET can block it too. Mark your home network as trusted there, or allow syncsound-desktop.exe.</p>
+          </details>
+          <details>
             <summary>What does it send over the internet?</summary>
-            <p>Only the update check, which downloads a small file from GitHub Releases. You can turn it off in the app. Audio, settings and microphone recordings never leave your PC.</p>
+            <p>Only the update check, which downloads a small file from GitHub Releases. You can turn it off in the app. Audio, settings and microphone recordings never go to the internet. With Network speakers on (off by default), audio goes only to devices you allow on your own Wi-Fi.</p>
           </details>
         </div>
       </div>

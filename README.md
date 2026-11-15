@@ -33,6 +33,36 @@
 2. Turn on the outputs you want, then select **Start routing**.
 3. Use **Delay** to fine-tune by ear. Bluetooth devices usually need extra delay on the *other* outputs.
 
+## Network speakers
+
+Play your PC audio on phones, tablets, other PCs and smart-TV browsers on the same Wi-Fi. Nothing is installed on them: they open a web page that SyncSound serves, over plain HTTP.
+
+![Network speakers phone page](docs/screenshots/06-network.png)
+
+**How to join**
+
+1. Open **Settings > Routing** and turn on the **Network speakers** card. It is off by default. SyncSound starts a server on port 4877 (it falls back up to 4887 if that is taken) and shows a QR code and an address, for example `http://192.168.1.90:4877`.
+2. **QR:** scan the code with the phone camera. The device joins immediately. The code carries a one-time token that expires after 10 minutes.
+3. **Typed address:** open the address in any browser on the same Wi-Fi, for example on a TV. The PC shows an **Allow / Deny** request and the device joins once you allow it.
+4. Tap **Tap to play** on the device. It then appears as an output on the Routing tab, with volume, mute, delay, position and EQ like any other speaker.
+5. Run **Calibrate** in Speaker setup to align the phone with your other speakers.
+
+**Latency.** The page targets a 150 ms buffer. If the Wi-Fi is weak and the sound breaks up, turn on **Weak Wi-Fi** on the device page for a 300 ms buffer. Calibrate measures the real delay of each device and sets the delay for you.
+
+**iPhone.** Keep the page open with the screen on. Safari pauses web audio when the screen locks, and a page served over plain HTTP cannot prevent that.
+
+**Privacy.** Off by default. Only private (LAN) addresses are accepted, never internet addresses. The server stops when you turn the card off, and everyone is disconnected.
+
+**Windows firewall.** The first time you turn it on, Windows asks whether to allow SyncSound on the network. Choose **Allow** on **Private networks**.
+
+### Phone can't connect?
+
+- **Same network.** The phone must be on the same Wi-Fi as the PC. Guest networks, and routers with "client isolation" or "AP isolation", stop devices from reaching each other.
+- **Windows firewall prompt.** If you dismissed it or chose Public only, allow `syncsound-desktop.exe` on Private networks in Windows Security > Firewall & network protection > Allow an app through firewall.
+- **Public network profile.** Windows blocks incoming connections more strictly on a network marked Public. In Settings > Network & internet > Wi-Fi > your network, set the profile to Private.
+- **Third-party antivirus firewalls.** Products such as Kaspersky, Norton and ESET run their own firewall on top of Windows. Mark your home network as trusted or private there, or allow `syncsound-desktop.exe`. For example, in Kaspersky set the network to Trusted. This is the most common cause when the Windows settings look right.
+- **Address.** Use the address shown on the card. If the PC has several network adapters (VPN, virtual machines), make sure the phone can reach that one.
+
 ## Speaker setup
 
 Each enabled output has four placement settings:
@@ -68,7 +98,7 @@ Spatial mode changes only what each speaker plays. Delay, gain, level and alignm
 
 ## Tabs
 
-- **Routing:** source, mode, outputs (gain, mute, delay, position), profiles and diagnostics.
+- **Routing:** source, network speakers, mode, outputs (gain, mute, delay, position), profiles and diagnostics.
 - **Speaker setup:** presets, the room map with 7.1 and 8D, and **Calibrate with a microphone**. Put a microphone at your seat, keep the room quiet, and press Calibrate. SyncSound plays clicks through each playing output in turn (about 6 s each) at that output's own gain. It finds when each output reaches the microphone and sets delays so all of them arrive together, with the smallest delay at 0. It needs at least two playing, unmuted outputs; outputs it can't hear clearly keep their delay. On the test setup it set the Realtek speaker to 255 ms behind the Bluetooth iOX 2; the manual measurement was 254 ms.
 - **Apps:** route only the apps you pick (up to 8) instead of all Windows audio. Each app is captured with Windows process loopback, and several apps are mixed on a shared timeline. Apps are remembered by executable name and reconnect when they restart. Windows still plays those apps on their own output, so to hear them only through SyncSound, set the app's output to a device you don't listen to in Windows' Volume mixer.
 - **Sound:** fuller sound on the speakers you already own.
