@@ -10,6 +10,7 @@ repository = "https://github.com/KasunRocz-Softwares/SoundSync"
 crossbeam-queue = "0.3"
 fft-convolver = "0.2"
 hound = "3.5"
+if-addrs = "0.13"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 rand = "0.8"
 serde.workspace = true

@@ -3,6 +3,8 @@
 //! a WebSocket upgrade. Bodies are never read.
 
 use std::io::{self, Read};
+use std::net::TcpStream;
+use std::time::Instant;
 
 /// Largest request head the server accepts.
 const MAX_HEAD: usize = 8 * 1024;
@@ -33,15 +35,29 @@ impl Request {
     }
 }
 
+/// Reads the request head, which must arrive completely before `deadline`
+/// (a client that sends one byte at a time cannot hold the thread longer).
+pub fn read_head_before(stream: &mut TcpStream, deadline: Instant) -> io::Result<Vec<u8>> {
+    read_head_with(stream, |s| {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "request head too slow"));
+        }
+        s.set_read_timeout(Some(left))
+    })
+}
+
 /// Reads bytes until the end of the request head (`\r\n\r\n`). Reads one
-/// byte at a time so nothing past the head is consumed.
-pub fn read_head(stream: &mut impl Read) -> io::Result<Vec<u8>> {
+/// byte at a time so nothing past the head is consumed; `before_read` runs
+/// before every read.
+fn read_head_with<R: Read>(stream: &mut R, mut before_read: impl FnMut(&mut R) -> io::Result<()>) -> io::Result<Vec<u8>> {
     let mut head = Vec::with_capacity(512);
     let mut byte = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
         if head.len() >= MAX_HEAD {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "request head too large"));
         }
+        before_read(stream)?;
         match stream.read(&mut byte)? {
             0 => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed")),
             _ => head.push(byte[0]),
@@ -100,7 +116,7 @@ mod tests {
     #[test]
     fn read_head_stops_at_blank_line() {
         let mut src: &[u8] = b"GET / HTTP/1.1\r\nA: b\r\n\r\nEXTRA";
-        let head = read_head(&mut src).unwrap();
+        let head = read_head_with(&mut src, |_| Ok(())).unwrap();
         assert!(head.ends_with(b"\r\n\r\n"));
         assert_eq!(src, b"EXTRA");
     }
