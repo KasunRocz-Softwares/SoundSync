@@ -428,6 +428,15 @@ impl OutputMetrics {
     }
 }
 
+/// Lifecycle state reported by an output worker (WASAPI or network).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkerPoll {
+    Starting,
+    Running,
+    Failed(String),
+    Stopped,
+}
+
 /// Per-output consumer. Owns a preallocated sample ring sized for the maximum
 /// delay so delay changes never allocate. Not shared across outputs.
 pub struct RenderPipeline {

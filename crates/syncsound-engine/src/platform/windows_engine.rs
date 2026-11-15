@@ -5,7 +5,7 @@
 use super::windows::{CaptureError, EndpointCatalog, LoopbackCapture};
 use super::windows_apps::list_audio_apps;
 use super::windows_mic::{list_microphones, MicRecorder, Microphone};
-use super::windows_render::{RenderWorker, WorkerPoll};
+use super::windows_render::RenderWorker;
 use crate::calibration::{
     analyze_output, click_sample, recorded_silence, silent_mic_message, soloed_output,
     solve_delays, solve_levels, total_frames, CalibratedOutput,
@@ -22,7 +22,7 @@ use crate::placement::{
 };
 use crate::render::{
     ms_to_frames, AudioMode, ChannelRole, OutputControls, OutputMetrics, RenderPipeline,
-    MAX_ENABLED_OUTPUTS,
+    WorkerPoll, MAX_ENABLED_OUTPUTS,
 };
 use crate::room;
 use crate::routing::AppSourceStatus;

@@ -2,7 +2,9 @@
 //! no mutable audio state is shared between outputs. The steady-state loop only
 //! waits on the WASAPI event, calls `RenderPipeline::render`, encodes, and releases.
 use super::windows::{Apartment, CaptureError, ComMemory};
-use crate::render::{encode_samples, DeviceSampleFormat, OutputMetrics, RenderPipeline};
+use crate::render::{
+    encode_samples, DeviceSampleFormat, OutputMetrics, RenderPipeline, WorkerPoll,
+};
 use crate::PcmFormat;
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
@@ -28,14 +30,6 @@ const STARTING: u8 = 0;
 const RUNNING: u8 = 1;
 const FAILED: u8 = 2;
 const STOPPED: u8 = 3;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorkerPoll {
-    Starting,
-    Running,
-    Failed(String),
-    Stopped,
-}
 
 struct WorkerStatus {
     state: AtomicU8,
