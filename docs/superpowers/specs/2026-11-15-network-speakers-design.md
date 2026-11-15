@@ -75,7 +75,7 @@ A new card on the Routing tab, under Outputs:
 └───────────────────────────────────────────────────────────────┘
 ```
 
-- Turning it on starts the server. The first time, a note explains the Windows Firewall prompt ("Choose Allow on Private networks").
+- Turning it on starts the server. The first time, a note explains the Windows Firewall prompt ("choose Allow"), and says to set the Wi-Fi to Private and allow SyncSound in any antivirus firewall if phones can't connect (new Windows 11 networks default to Public).
 - A phone that **scans the QR code connects immediately** and appears as a new output (the code carries a one-time token that expires after 10 minutes and is replaced after each use). A device that types the address shows up under **Waiting to join** with a name guessed from its browser ("iPhone (Safari)"); the user can rename it later. **Allow** turns it into an output; **Deny** closes it.
 - Allowed devices appear in the Outputs list as normal outputs, tagged **Network**, with their reported latency. They're remembered: when the same device opens the page again, it joins without asking.
 - Turning the feature off disconnects everyone and stops the server.

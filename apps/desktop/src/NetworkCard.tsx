@@ -136,7 +136,7 @@ export function NetworkCard({ snapshot, onChange }: { snapshot: EngineSnapshot |
 
     {firewallNote && <div className="net-note" role="status">
       <AlertTriangle size={15} />
-      <span>Windows may ask about the firewall. Choose <strong>Allow</strong> on Private networks.</span>
+      <span>Windows may ask about the firewall: choose <strong>Allow</strong>. If phones can't connect, set this Wi-Fi to Private in Windows settings, and allow SyncSound in any antivirus firewall (Kaspersky, Norton, ESET...).</span>
       <button className="icon-btn" title="Dismiss" aria-label="Dismiss" onClick={() => setFirewallNote(false)}><X size={14} /></button>
     </div>}
 
