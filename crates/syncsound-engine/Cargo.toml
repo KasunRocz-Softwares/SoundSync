@@ -10,9 +10,12 @@ repository = "https://github.com/KasunRocz-Softwares/SoundSync"
 crossbeam-queue = "0.3"
 fft-convolver = "0.2"
 hound = "3.5"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+rand = "0.8"
 serde.workspace = true
 serde_json.workspace = true
 thiserror = "2"
+tungstenite = "0.24"
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Devices_FunctionDiscovery", "Win32_System_Variant", "Win32_Media_KernelStreaming", "Win32_System_Threading", "Win32_Security"] }

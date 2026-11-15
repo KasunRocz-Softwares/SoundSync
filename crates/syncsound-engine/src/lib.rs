@@ -16,6 +16,7 @@ pub mod eq;
 pub mod meter;
 pub mod metrics;
 pub mod mixer;
+pub mod net;
 pub mod output_state;
 pub mod placement;
 pub mod platform;
