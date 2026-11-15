@@ -95,7 +95,8 @@ $armLibs = @("${env:ProgramFiles(x86)}\Microsoft Visual Studio", "$env:ProgramFi
 $armReady = (-not $NoArm64) -and ((rustup target list --installed) -contains $armTarget) -and $armLibs
 if ($armReady) {
     Write-Host "==> Building the Windows on ARM installer"
-    $keyPassword | npm run desktop:build -- --target $armTarget
+    # Called directly: Windows PowerShell 5.1 drops the "--" that npm needs to pass arguments on.
+    $keyPassword | npx tauri build --target $armTarget
     if ($LASTEXITCODE -ne 0) { throw "ARM64 build failed with exit code $LASTEXITCODE" }
     $armSetup = Get-Item "target/$armTarget/release/bundle/nsis/SyncSound_${Version}_arm64-setup.exe"
     $armSig = Get-Item "$($armSetup.FullName).sig"
