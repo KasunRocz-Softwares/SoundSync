@@ -1,8 +1,10 @@
 # SyncSound — play Windows audio on every speaker, in sync
 
-**Status: developer preview.** SyncSound captures Windows audio with WASAPI loopback and plays it on up to eight outputs at once: wired, USB, HDMI and Bluetooth. Each output has its own buffer, drift correction, gain, mute, delay and EQ. A one-click microphone calibration measures when each speaker reaches your seat and sets the delays for you. The latency numbers on the output cards are Windows estimates; use Calibrate for measured alignment.
+**Status: developer preview.** SyncSound captures Windows audio with WASAPI loopback and plays it on up to sixteen outputs at once: wired, USB, HDMI and Bluetooth. Each output has its own buffer, drift correction, gain, mute, delay and EQ. A one-click microphone calibration measures when each speaker reaches your seat and sets the delays for you. The latency numbers on the output cards are Windows estimates; use Calibrate for measured alignment.
 
 **[Download the latest release](https://github.com/KasunRocz-Softwares/SoundSync/releases/latest)** (Windows 11 x64) · [Website](https://kasunrocz-softwares.github.io/SoundSync/) · [Code signing policy](docs/CODE_SIGNING.md)
+
+[![SyncSound on AlternativeTo](https://alternativeto.net/static/badges/badge-wide-light.svg)](https://alternativeto.net/software/syncsound/about/?utm_source=badge&utm_medium=referral)
 
 | Speaker setup: room map, 7.1 and 8D | Per-speaker equalizer |
 |---|---|
