@@ -152,6 +152,7 @@ const VIEW = {
   paused: { cta: "Tap to play", status: "Sound paused on this device." },
   reconnecting: { cta: "", status: "Disconnected, reconnecting…" },
   denied: { cta: "Tap to try again", status: "The PC didn't allow this device." },
+  replaced: { cta: "Tap to play here", status: "Playing in another tab or window." },
   unsupported: { cta: "", status: "This browser can't play SyncSound audio" },
 };
 
@@ -164,11 +165,11 @@ function show(state) {
   el.cta.textContent = v.cta;
   el.status.textContent = state === "playing" ? "Playing · in sync with " + pcName : v.status;
   el.sub.textContent = v.sub || "";
-  const tappable = state === "idle" || state === "paused" || state === "denied";
+  const tappable = state === "idle" || state === "paused" || state === "denied" || state === "replaced";
   el.play.disabled = state === "unsupported";
   el.play.setAttribute("aria-label", tappable ? v.cta : v.status);
   el.play.setAttribute("aria-disabled", tappable ? "false" : "true");
-  el.stop.hidden = state === "idle" || state === "denied" || state === "unsupported";
+  el.stop.hidden = state === "idle" || state === "denied" || state === "replaced" || state === "unsupported";
   renderLatency();
 }
 
@@ -343,6 +344,7 @@ function connect() {
     }
     if (msg.type === "welcome") onWelcome(msg);
     else if (msg.type === "denied") onDenied();
+    else if (msg.type === "replaced") onReplaced();
   };
 
   sock.onclose = () => {
@@ -385,6 +387,22 @@ function onDenied() {
   flushAudio();
   releaseKeepAlive();
   show("denied");
+}
+
+// Another tab or window with this device key took over. Do not reconnect,
+// or the two would keep replacing each other; a tap here takes it back.
+function onReplaced() {
+  wanted = false;
+  streaming = false;
+  clearTimeout(retryTimer);
+  flushAudio();
+  releaseKeepAlive();
+  if (ctx && ctx.suspend) {
+    const p = ctx.suspend();
+    if (p && p.catch) p.catch(() => {});
+  }
+  lastLatencyMs = 0;
+  show("replaced");
 }
 
 function scheduleRetry() {

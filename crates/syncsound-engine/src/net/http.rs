@@ -85,6 +85,50 @@ pub fn parse(head: &[u8]) -> Option<Request> {
     Some(Request { method, path, headers })
 }
 
+/// True when a `Host` header names this PC the way a LAN device reaches it:
+/// an IP literal (IPv4 or bracketed IPv6), `localhost`, a single-label name
+/// or a `.local` name, with an optional port. Anything else (such as
+/// `evil.example.com` resolving to this PC) is DNS rebinding and is refused.
+pub fn host_allowed(host: &str) -> bool {
+    let host = host.trim();
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        // [v6] or [v6]:port
+        let Some((inner, after)) = rest.split_once(']') else { return false };
+        if !(after.is_empty() || after.strip_prefix(':').is_some_and(is_port)) {
+            return false;
+        }
+        return inner.parse::<std::net::Ipv6Addr>().is_ok();
+    } else {
+        match host.split_once(':') {
+            Some((name, port)) if is_port(port) => name,
+            Some(_) => return false,
+            None => host,
+        }
+    };
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.') {
+        return false;
+    }
+    let name = name.to_ascii_lowercase();
+    name.parse::<std::net::Ipv4Addr>().is_ok()
+        || name == "localhost"
+        || !name.contains('.')
+        || (name.ends_with(".local") && name.len() > ".local".len())
+}
+
+fn is_port(p: &str) -> bool {
+    !p.is_empty() && p.len() <= 5 && p.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// True when a WebSocket upgrade comes from this server's own page: no
+/// `Origin` (non-browser clients), or exactly `http://` + the `Host` header.
+/// A page from any other site open in a LAN browser is refused.
+pub fn origin_allowed(origin: Option<&str>, host: &str) -> bool {
+    match origin {
+        None => true,
+        Some(origin) => origin.trim().eq_ignore_ascii_case(&format!("http://{}", host.trim())),
+    }
+}
+
 /// A complete response with a body and `Connection: close`.
 pub fn response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = format!(
@@ -111,6 +155,31 @@ mod tests {
         assert!(req.is_websocket_upgrade());
         assert!(parse(b"GET nopath HTTP/1.1\r\n\r\n").is_none());
         assert!(parse(b"garbage\r\n\r\n").is_none());
+    }
+
+    #[test]
+    fn host_must_be_a_lan_name() {
+        for ok in ["192.168.1.20:4877", "192.168.1.20", "127.0.0.1:4877", "[::1]:4877", "[fe80::1]", "localhost:4877",
+            "LOCALHOST", "kasun-pc:4877", "x", "kasun-pc.local:4877", "Kasun-PC.LOCAL"]
+        {
+            assert!(host_allowed(ok), "{ok}");
+        }
+        for bad in ["evil.example.com", "evil.example.com:4877", "192.168.1.20.nip.io:4877", ".local", "", ":4877",
+            "[::1", "[::1]x", "[evil]:4877", "a:b", "kasun-pc:", "local.evil.com", "a b"]
+        {
+            assert!(!host_allowed(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn origin_must_match_host() {
+        assert!(origin_allowed(None, "192.168.1.20:4877"));
+        assert!(origin_allowed(Some("http://192.168.1.20:4877"), "192.168.1.20:4877"));
+        assert!(origin_allowed(Some("HTTP://Kasun-PC.local:4877"), "kasun-pc.local:4877"));
+        assert!(!origin_allowed(Some("http://evil.example.com"), "192.168.1.20:4877"));
+        assert!(!origin_allowed(Some("http://192.168.1.20"), "192.168.1.20:4877"));
+        assert!(!origin_allowed(Some("https://192.168.1.20:4877"), "192.168.1.20:4877"));
+        assert!(!origin_allowed(Some("null"), "192.168.1.20:4877"));
     }
 
     #[test]

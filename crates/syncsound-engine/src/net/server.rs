@@ -58,6 +58,10 @@ const CTL_WAITING: u8 = 0;
 const CTL_PLAY: u8 = 1;
 const CTL_DENIED: u8 = 2;
 const CTL_CLOSE: u8 = 3;
+/// Another socket with the same key took over: send `replaced`, then close.
+const CTL_REPLACED: u8 = 4;
+/// How often the accept thread checks for new connections and for `stop`.
+const ACCEPT_POLL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerEvent {
@@ -255,9 +259,7 @@ impl NetworkServer {
         if self.shared.stopping.swap(true, Ordering::AcqRel) {
             return;
         }
-        // Wake the blocking accept() so the thread sees `stopping`.
-        let wake = SocketAddr::from((Ipv4Addr::LOCALHOST, self.port));
-        let _ = TcpStream::connect_timeout(&wake, Duration::from_millis(500));
+        // The accept thread polls `stopping` every ACCEPT_POLL.
         if let Some(handle) = self.accept.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = handle.join();
         }
@@ -365,13 +367,26 @@ fn pick_lan_ipv4(default_route: Option<IpAddr>, interfaces: &[IpAddr]) -> Ipv4Ad
         .unwrap_or(Ipv4Addr::LOCALHOST)
 }
 
+/// Accepts connections until `stop`. The listener is non-blocking and polled
+/// every `ACCEPT_POLL`, so stopping never depends on waking a blocked accept.
 fn accept_loop(shared: Arc<Shared>, listener: TcpListener) {
-    for stream in listener.incoming() {
-        if shared.stopping() {
-            break;
+    if listener.set_nonblocking(true).is_err() {
+        return;
+    }
+    while !shared.stopping() {
+        let (stream, peer) = match listener.accept() {
+            Ok(pair) => pair,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => {
+                // WouldBlock (nothing waiting) or a transient error.
+                std::thread::sleep(ACCEPT_POLL);
+                continue;
+            }
+        };
+        // Accepted sockets may inherit non-blocking mode (Windows does).
+        if stream.set_nonblocking(false).is_err() {
+            continue;
         }
-        let Ok(stream) = stream else { continue };
-        let Ok(peer) = stream.peer_addr() else { continue };
         if !is_local(peer.ip()) || !claim_slot(&shared, peer.ip()) {
             drop(stream);
             continue;
@@ -435,6 +450,10 @@ fn serve_http(shared: &Arc<Shared>, mut stream: TcpStream, peer: SocketAddr, id:
     let Some(req) = http::parse(&head) else {
         return stream.write_all(&http::response("400 Bad Request", "text/plain", b"Bad request"));
     };
+    // DNS rebinding: only answer to addresses a LAN device would type or scan.
+    let Some(host) = req.header("host").filter(|h| http::host_allowed(h)) else {
+        return stream.write_all(&http::response("403 Forbidden", "text/plain", b"Forbidden"));
+    };
     let file = match req.path.as_str() {
         "/" => Some(("text/html; charset=utf-8", INDEX_HTML)),
         "/player.js" => Some(("text/javascript; charset=utf-8", PLAYER_JS)),
@@ -450,6 +469,10 @@ fn serve_http(shared: &Arc<Shared>, mut stream: TcpStream, peer: SocketAddr, id:
     }
     if req.path != "/ws" {
         return stream.write_all(&http::response("404 Not Found", "text/plain", b"Not found"));
+    }
+    // Another site's page in a LAN browser may not open the audio socket.
+    if !http::origin_allowed(req.header("origin"), host) {
+        return stream.write_all(&http::response("403 Forbidden", "text/plain", b"Forbidden"));
     }
     let Some(ws_key) = req.header("sec-websocket-key").filter(|_| req.is_websocket_upgrade()) else {
         return stream.write_all(&http::response("400 Bad Request", "text/plain", b"Expected WebSocket"));
@@ -566,6 +589,10 @@ fn run_device(shared: &Arc<Shared>, mut ws: WebSocket<TcpStream>, peer: SocketAd
                     return close(ws);
                 }
                 CTL_CLOSE => return close(ws),
+                CTL_REPLACED => {
+                    send_json(&mut ws, json!({ "type": "replaced" }));
+                    return close(ws);
+                }
                 _ => {}
             }
             if let Polled::Closed = poll(&mut ws) {
@@ -580,6 +607,10 @@ fn run_device(shared: &Arc<Shared>, mut ws: WebSocket<TcpStream>, peer: SocketAd
         stream_audio(shared, &mut ws, &link, &ctl);
     }
     leave(shared, &key, id);
+    if ctl.load(Ordering::Acquire) == CTL_REPLACED {
+        // The page stops retrying, so two tabs never keep replacing each other.
+        send_json(&mut ws, json!({ "type": "replaced" }));
+    }
     close(ws);
 }
 
@@ -627,7 +658,7 @@ fn admit(
         return Admit::Refuse;
     }
     if let Some(old) = st.waiting.insert(key.to_string(), Conn { id, ip, ctl: ctl.clone() }) {
-        old.ctl.store(CTL_CLOSE, Ordering::Release);
+        old.ctl.store(CTL_REPLACED, Ordering::Release);
     }
     st.pending.retain(|p| p.key != key);
     let device = PendingDevice { key: key.to_string(), name: guessed.to_string(), address: ip.to_string() };
@@ -646,7 +677,7 @@ fn forget_waiting(shared: &Shared, key: &str, id: u64) {
 }
 
 /// Makes this connection the live one for `key`. A previous live connection
-/// is told to close, and no second `Joined` is emitted for it.
+/// is told it was replaced and closes, and no second `Joined` is emitted.
 fn join_device(shared: &Shared, key: &str, guessed: &str, id: u64, ip: IpAddr, ctl: &Arc<AtomicU8>) -> (Arc<DeviceLink>, String) {
     let mut st = shared.lock();
     let name = st.allowed.entry(key.to_string()).or_insert_with(|| guessed.to_string()).clone();
@@ -657,13 +688,13 @@ fn join_device(shared: &Shared, key: &str, guessed: &str, id: u64, ip: IpAddr, c
         .clone();
     if let Some(old) = st.waiting.remove(key) {
         if old.id != id {
-            old.ctl.store(CTL_CLOSE, Ordering::Release);
+            old.ctl.store(CTL_REPLACED, Ordering::Release);
         }
     }
     st.pending.retain(|p| p.key != key);
     ctl.store(CTL_PLAY, Ordering::Release);
     match st.current.insert(key.to_string(), Conn { id, ip, ctl: ctl.clone() }) {
-        Some(old) => old.ctl.store(CTL_CLOSE, Ordering::Release),
+        Some(old) => old.ctl.store(CTL_REPLACED, Ordering::Release),
         None => st.events.push(ServerEvent::Joined { key: key.to_string(), name: name.clone() }),
     }
     // Stale audio from before this (re)connect is dropped; the first frame
@@ -944,6 +975,7 @@ mod tests {
         let link = server.link(KEY_A).unwrap();
         let mut second = connect(&server);
         assert_eq!(hello(&mut second, KEY_A, None)["state"], "playing");
+        assert_eq!(read_json(&mut first)["type"], "replaced", "told before the close, so it stops retrying");
         assert!(closed(&mut first), "the older socket is closed");
         assert!(Arc::ptr_eq(&link, &server.link(KEY_A).unwrap()), "one link per key");
         std::thread::sleep(Duration::from_millis(100));
@@ -955,6 +987,85 @@ mod tests {
         let ev = events_until(&server, |e| e.iter().any(|e| matches!(e, ServerEvent::Left { .. })));
         assert!(ev.iter().any(|e| matches!(e, ServerEvent::Left { key } if key == KEY_A)));
         assert!(!link.connected());
+    }
+
+    #[test]
+    fn newer_waiting_socket_tells_the_older_one_it_was_replaced() {
+        let server = NetworkServer::start(vec![], 0).unwrap();
+        let mut first = connect(&server);
+        assert_eq!(hello(&mut first, KEY_A, None)["state"], "waiting");
+        let mut second = connect(&server);
+        assert_eq!(hello(&mut second, KEY_A, None)["state"], "waiting");
+        assert_eq!(read_json(&mut first)["type"], "replaced");
+        assert!(closed(&mut first));
+        assert_eq!(server.pending().len(), 1);
+    }
+
+    /// Sends a raw request head and returns the whole response.
+    fn raw(server: &NetworkServer, head: &str) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", server.port())).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        s.write_all(head.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        let _ = s.read_to_end(&mut out);
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    fn upgrade_head(host: &str, origin: Option<&str>) -> String {
+        let origin = origin.map(|o| format!("Origin: {o}\r\n")).unwrap_or_default();
+        format!(
+            "GET /ws HTTP/1.1\r\nHost: {host}\r\n{origin}Upgrade: websocket\r\nConnection: Upgrade\r\n\
+             Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+        )
+    }
+
+    #[test]
+    fn foreign_origin_cannot_open_the_socket() {
+        let server = NetworkServer::start(vec![], 0).unwrap();
+        let host = format!("127.0.0.1:{}", server.port());
+        let reply = raw(&server, &upgrade_head(&host, Some("http://evil.example.com")));
+        assert!(reply.starts_with("HTTP/1.1 403"), "{reply}");
+        let reply = raw(&server, &upgrade_head(&host, Some(&format!("http://127.0.0.1:{}", server.port() + 1))));
+        assert!(reply.starts_with("HTTP/1.1 403"), "{reply}");
+        assert!(server.pending().is_empty());
+    }
+
+    #[test]
+    fn rebinding_host_is_refused() {
+        let server = NetworkServer::start(vec![], 0).unwrap();
+        let host = format!("evil.example.com:{}", server.port());
+        let page = raw(&server, &format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"));
+        assert!(page.starts_with("HTTP/1.1 403"), "{page}");
+        let js = raw(&server, &format!("GET /player.js HTTP/1.1\r\nHost: {host}\r\n\r\n"));
+        assert!(js.starts_with("HTTP/1.1 403"), "{js}");
+        let origin = format!("http://{host}");
+        let ws = raw(&server, &upgrade_head(&host, Some(&origin)));
+        assert!(ws.starts_with("HTTP/1.1 403"), "{ws}");
+        let no_host = raw(&server, "GET / HTTP/1.1\r\n\r\n");
+        assert!(no_host.starts_with("HTTP/1.1 403"), "{no_host}");
+    }
+
+    #[test]
+    fn own_page_origin_joins() {
+        use tungstenite::client::IntoClientRequest;
+        let server = NetworkServer::start(vec![], 0).unwrap();
+        let mut req = format!("ws://127.0.0.1:{}/ws", server.port()).into_client_request().unwrap();
+        let origin = format!("http://127.0.0.1:{}", server.port());
+        req.headers_mut().insert("Origin", origin.parse().unwrap());
+        let (mut ws, _) = tungstenite::connect(req).unwrap();
+        if let MaybeTlsStream::Plain(s) = ws.get_ref() {
+            s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        }
+        assert_eq!(hello(&mut ws, KEY_A, None)["state"], "waiting");
+    }
+
+    #[test]
+    fn stop_returns_promptly() {
+        let server = NetworkServer::start(vec![], 0).unwrap();
+        let t0 = Instant::now();
+        server.stop();
+        assert!(t0.elapsed() < Duration::from_secs(1), "stop took {:?}", t0.elapsed());
+        assert!(server.shared.lock().threads.is_empty());
     }
 
     #[test]
