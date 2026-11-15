@@ -1,6 +1,8 @@
 //! Network speakers: shared types and identifiers for devices that play audio
 //! over the local network instead of a local WASAPI render endpoint.
 
+pub mod convert;
+
 use serde::{Deserialize, Serialize};
 
 /// Prefix that distinguishes network endpoint ids from WASAPI endpoint ids.
