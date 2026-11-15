@@ -42,6 +42,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// from that address are ignored for `FAIL_WINDOW`.
 const MAX_TOKEN_FAILURES: usize = 5;
 const FAIL_WINDOW: Duration = Duration::from_secs(60);
+/// How often the server re-reads the PC's LAN address (Wi-Fi changes, DHCP).
+const ADDRESS_REFRESH: Duration = Duration::from_secs(10);
 /// Largest WebSocket message or frame a device may send (its JSON is tiny).
 const MAX_CLIENT_MESSAGE: usize = 4 * 1024;
 
@@ -103,6 +105,9 @@ struct Shared {
     stopping: AtomicBool,
     next_id: AtomicU64,
     limits: Limits,
+    /// `http://<LAN IPv4>:<port>`, refreshed by the address thread so callers
+    /// (the engine thread) never do network lookups.
+    base_url: Mutex<String>,
 }
 
 impl Shared {
@@ -142,6 +147,7 @@ pub struct NetworkServer {
     shared: Arc<Shared>,
     port: u16,
     accept: Mutex<Option<JoinHandle<()>>>,
+    address: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl NetworkServer {
@@ -164,24 +170,30 @@ impl NetworkServer {
             stopping: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
             limits,
+            base_url: Mutex::new(base_url(port)),
         });
         let accept_shared = shared.clone();
         let accept = std::thread::Builder::new()
             .name("syncsound-net-accept".into())
             .spawn(move || accept_loop(accept_shared, listener))?;
-        Ok(Self { shared, port, accept: Mutex::new(Some(accept)) })
+        let address_shared = shared.clone();
+        let address = std::thread::Builder::new()
+            .name("syncsound-net-address".into())
+            .spawn(move || address_loop(address_shared, port))
+            .ok();
+        Ok(Self { shared, port, accept: Mutex::new(Some(accept)), address: Mutex::new(address) })
     }
 
     pub fn port(&self) -> u16 {
         self.port
     }
 
-    /// `http://<this PC's private IPv4>:<port>`.
+    /// `http://<this PC's private IPv4>:<port>`. Cached: no I/O.
     pub fn url(&self) -> String {
-        format!("http://{}:{}", lan_ipv4(), self.port)
+        self.shared.base_url.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// Page address with the live one-time join token, for the QR code.
+    /// Page address with the live one-time join token, for the QR code. No I/O.
     pub fn qr_url(&self) -> String {
         let token = self.shared.lock().tokens.current(Instant::now());
         format!("{}/?join={token}", self.url())
@@ -232,6 +244,9 @@ impl NetworkServer {
         if let Some(handle) = self.accept.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = handle.join();
         }
+        if let Some(handle) = self.address.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = handle.join();
+        }
         let threads = {
             let mut st = self.shared.lock();
             for s in st.sockets.values() {
@@ -270,6 +285,26 @@ fn bind(port: u16) -> io::Result<TcpListener> {
         }
     }
     Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::AddrInUse, "no free port")))
+}
+
+fn base_url(port: u16) -> String {
+    format!("http://{}:{port}", lan_ipv4())
+}
+
+/// Re-reads the LAN address every `ADDRESS_REFRESH` until the server stops.
+/// Sleeps in short steps so `stop` never waits long for it.
+fn address_loop(shared: Arc<Shared>, port: u16) {
+    const STEP: Duration = Duration::from_millis(50);
+    let mut next = Instant::now() + ADDRESS_REFRESH;
+    while !shared.stopping() {
+        std::thread::sleep(STEP);
+        if Instant::now() < next || shared.stopping() {
+            continue;
+        }
+        next = Instant::now() + ADDRESS_REFRESH;
+        let url = base_url(port);
+        *shared.base_url.lock().unwrap_or_else(|e| e.into_inner()) = url;
+    }
 }
 
 /// The PC's address on the home network, from its interfaces and the source

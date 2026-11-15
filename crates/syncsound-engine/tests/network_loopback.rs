@@ -109,6 +109,10 @@ fn disconnect_marks_unavailable_and_rejoin_reuses_output() {
         .take(1)
         .map(|e| e.id.clone())
         .collect();
+    if others.is_empty() {
+        println!("SKIPPED: needs one active Windows render endpoint besides the network speaker");
+        return;
+    }
     let mut ws = connect(port);
     let snapshot = wait_for(&engine, Duration::from_secs(2), |s| {
         net_output(s).is_some_and(|o| o.config.enabled && o.endpoint_available)
@@ -141,8 +145,16 @@ fn disconnect_marks_unavailable_and_rejoin_reuses_output() {
 
     let last = contiguous_chunks(&mut ws, 20);
     println!("first connection: 20 contiguous chunks, last seq {last}");
-    let before = wait_for(&engine, Duration::from_secs(1), |_| true);
+    // Settle so start-up underruns are not counted, keep reading meanwhile.
+    let settle = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < settle {
+        contiguous_chunks(&mut ws, 1);
+    }
+    let before = engine.snapshot();
     print(&before);
+    let underruns = |s: &EngineSnapshot, id: &str| {
+        s.outputs.iter().find(|o| o.endpoint_id == id).unwrap().metrics.underruns
+    };
 
     // Drop the socket: the output becomes unavailable within 3 s.
     drop(ws);
@@ -156,16 +168,26 @@ fn disconnect_marks_unavailable_and_rejoin_reuses_output() {
     println!("unavailable after {} ms", dropped_at.elapsed().as_millis());
     assert_eq!(out.last_error.as_deref(), Some("Disconnected"));
     for id in &others {
-        let u = |s: &EngineSnapshot| s.outputs.iter().find(|o| &o.endpoint_id == id).unwrap().metrics.underruns;
-        assert_eq!(u(&before), u(&after), "other output's underruns changed");
+        assert_eq!(underruns(&before, id), underruns(&after, id), "other output underran on disconnect");
     }
 
     // Reconnect: audio flows again on the same output, same gain.
     let mut ws = connect(port);
     let last = contiguous_chunks(&mut ws, 20);
     println!("second connection: 20 contiguous chunks, last seq {last}");
+    let settle = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < settle {
+        contiguous_chunks(&mut ws, 1);
+    }
     let rejoined = engine.snapshot();
     print(&rejoined);
+    for id in &others {
+        assert_eq!(
+            underruns(&before, id),
+            underruns(&rejoined, id),
+            "other output underran across disconnect and rejoin"
+        );
+    }
     let out = net_output(&rejoined).expect("net output");
     assert!(out.endpoint_available);
     assert_eq!(out.config.gain, 0.4);
