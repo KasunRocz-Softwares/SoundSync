@@ -56,6 +56,11 @@ const COMMANDS: &[&str] = &[
     "ab_recall",
     "export_settings",
     "import_settings",
+    "set_network",
+    "allow_network_device",
+    "deny_network_device",
+    "rename_network_device",
+    "forget_network_device",
 ];
 
 fn main() {

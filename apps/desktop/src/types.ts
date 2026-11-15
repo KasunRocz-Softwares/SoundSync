@@ -130,6 +130,14 @@ export type OutputStatus = {
   convolution_error: string | null;
 };
 
+export type PendingDevice = { key: string; name: string; address: string };
+/** Network speakers (phones, TVs, PCs on the home Wi-Fi). `qr_svg` is made by our engine. */
+export type NetworkStatus = {
+  enabled: boolean; url: string | null; qr_svg: string | null; pending: PendingDevice[]; error: string | null;
+};
+/** Prefix of network speaker endpoint ids (`net:<key>`). */
+export const NET_PREFIX = 'net:';
+
 export type ErrorRecord = { at_ms: number; scope: string; message: string };
 
 export type EngineSnapshot = {
@@ -149,6 +157,7 @@ export type EngineSnapshot = {
   calibration: CalibrationProgress | null;
   endpoints: AudioEndpoint[];
   recent_errors: ErrorRecord[];
+  network: NetworkStatus;
   updated_at_ms: number;
 };
 

@@ -18,6 +18,7 @@ import { CalibrationCard } from './CalibrationCard';
 import { Updater } from './Updater';
 import { SettingsPanel } from './SettingsPanel';
 import { VirtualSpeakerCard } from './VirtualSpeakerCard';
+import { NetworkCard } from './NetworkCard';
 import './style.css';
 
 const MODES: { id: AudioMode; label: string; detail: string }[] = [
@@ -203,14 +204,15 @@ function OutputCard({ endpoint, status, running, enabledCount, sourceChannels, o
   const atLimit = !enabled && enabledCount >= MAX_ENABLED_OUTPUTS;
   const showMetrics = running && enabled && state === 'running';
   const bluetooth = endpoint.bus === 'BTHENUM' || endpoint.bus === 'BTHLEDEVICE';
+  const network = endpoint.connection_type === 'Network';
   return <article className={`device ${enabled ? 'on' : ''} ${unavailable ? 'unavailable' : ''}`}>
     <div className="device-top">
       <div className="device-icon"><Volume2 size={21} /></div>
       <div className="device-info">
-        <h3>{endpoint.name}{endpoint.is_default && <span className="tag">Windows default</span>}{bluetooth && <span className="tag bt">Bluetooth</span>}</h3>
+        <h3>{endpoint.name}{endpoint.is_default && <span className="tag">Windows default</span>}{bluetooth && <span className="tag bt">Bluetooth</span>}{network && <span className="tag net">Network</span>}</h3>
         <p>
           {[endpoint.connection_type, endpoint.mix_format && `${endpoint.mix_format.channels} ch · ${endpoint.mix_format.sample_rate.toLocaleString()} Hz`,
-            endpoint.bits_per_sample && `${endpoint.bits_per_sample}-bit mix`, unavailable && 'Unplugged or disabled'].filter(Boolean).join(' · ') || 'Format unknown'}
+            endpoint.bits_per_sample && `${endpoint.bits_per_sample}-bit mix`, unavailable && (network ? 'Not connected' : 'Unplugged or disabled')].filter(Boolean).join(' · ') || 'Format unknown'}
         </p>
       </div>
       {enabled && running && <span className={`state ${state}`}>{STATE_LABEL[state]}</span>}
@@ -476,6 +478,8 @@ function App() {
           {unavailable.map(e => <OutputCard key={e.id} endpoint={e} status={statusById.get(e.id)} running={running} enabledCount={enabledCount} sourceChannels={snapshot?.capture_format.channels ?? 2} onAction={act} />)}
         </div>}
       </>}
+
+      <NetworkCard snapshot={snapshot} onChange={() => void poll()} />
 
       <section className="panel grid2">
         <div>

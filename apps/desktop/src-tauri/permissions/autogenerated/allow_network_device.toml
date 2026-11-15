@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-allow-network-device"
+description = "Enables the allow_network_device command without any pre-configured scope."
+commands.allow = ["allow_network_device"]
+
+[[permission]]
+identifier = "deny-allow-network-device"
+description = "Denies the allow_network_device command without any pre-configured scope."
+commands.deny = ["allow_network_device"]

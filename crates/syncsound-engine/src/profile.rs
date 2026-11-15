@@ -607,6 +607,23 @@ mod tests {
     }
 
     #[test]
+    fn unknown_network_outputs_are_listed_missing_not_rejected() {
+        // A forgotten (or not yet known) network speaker in a saved profile.
+        let mut p = profile();
+        p.outputs[1].endpoint_id = "net:0123456789abcdef".into();
+        let p = Profile::from_json(&p.to_json()).expect("net: ids load");
+        let endpoints = [endpoint("id-a", "Speakers")];
+        let plan = p.plan_apply(&endpoints);
+        assert_eq!(plan.outputs.len(), 1);
+        assert_eq!(plan.outputs[0].endpoint_id, "id-a");
+        assert_eq!(plan.missing.len(), 1);
+        assert_eq!(plan.missing[0].endpoint_id, "net:0123456789abcdef");
+        // Once the engine knows the device, its settings are restored.
+        let known = [endpoint("id-a", "Speakers"), endpoint("net:0123456789abcdef", "TV")];
+        assert_eq!(p.plan_apply(&known).outputs.len(), 2);
+    }
+
+    #[test]
     fn missing_pinned_source_is_reported_not_substituted() {
         let mut p = profile();
         p.source = ProfileSource::Endpoint("gone".into());

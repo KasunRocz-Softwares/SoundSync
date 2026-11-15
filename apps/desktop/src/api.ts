@@ -3,7 +3,7 @@ import type {
   AudioEndpoint, AudioMode, ChannelRole, EngineSnapshot, ProfileLoadReport, SoundPreset, SpatialConfig,
   SpeakerPosition, StereoSpread, EqSettings, AudioApp, Microphone, CalibrationReport,
   RoomReport, AppSettings, VirtualSpeakerStatus, SoundSettings, ListeningMode, AppMode, OutputSpectrum,
-  WorkflowStatus, HotkeyStatus, SourceChannels,
+  WorkflowStatus, HotkeyStatus, SourceChannels, NetworkStatus,
 } from './types';
 
 export function errorMessage(error: unknown): string {
@@ -75,6 +75,11 @@ export const api = {
   virtualSpeaker: () => invoke<VirtualSpeakerStatus>('virtual_speaker_status'),
   enableVirtualSpeaker: () => invoke<VirtualSpeakerStatus>('enable_virtual_speaker'),
   disableVirtualSpeaker: () => invoke<VirtualSpeakerStatus>('disable_virtual_speaker'),
+  setNetwork: (enabled: boolean) => invoke<NetworkStatus>('set_network', { enabled }),
+  allowNetworkDevice: (key: string) => invoke<void>('allow_network_device', { key }),
+  denyNetworkDevice: (key: string) => invoke<void>('deny_network_device', { key }),
+  renameNetworkDevice: (key: string, name: string) => invoke<void>('rename_network_device', { key, name }),
+  forgetNetworkDevice: (key: string) => invoke<void>('forget_network_device', { key }),
   spatial: (c: SpatialConfig) =>
     invoke<void>('set_spatial', { enabled: c.enabled, layout: c.layout, rotationS: c.rotation_s, clockwise: c.clockwise }),
 };

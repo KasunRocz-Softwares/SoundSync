@@ -104,7 +104,110 @@ async fn get_audio_devices(state: State<'_, AppState>) -> CmdResult<Vec<AudioEnd
 
 #[tauri::command]
 async fn get_engine_status(state: State<'_, AppState>) -> CmdResult<EngineSnapshot> {
-    Ok(state.engine.snapshot())
+    let snapshot = state.engine.snapshot();
+    // The UI polls this: remember network devices that joined by QR or Allow.
+    if snapshot.network.enabled {
+        system::save_network_joins(&state);
+    }
+    Ok(snapshot)
+}
+
+// ---------- Network speakers ----------
+
+fn network_key(key: &str) -> CmdResult<()> {
+    if syncsound_engine::net::access::valid_key(key) {
+        Ok(())
+    } else {
+        Err(CommandError::new("invalid_id", "Network device key is malformed"))
+    }
+}
+
+/// Turns the network speaker server on or off and remembers the choice.
+#[tauri::command]
+async fn set_network(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<syncsound_engine::net::NetworkStatus> {
+    let devices = state.settings.lock().unwrap().network_devices.clone();
+    let status = state
+        .engine
+        .set_network(enabled, devices)
+        .map_err(engine_error)?;
+    let mut settings = state.settings.lock().unwrap();
+    // A failed start stays off, so the next launch doesn't retry it silently.
+    settings.network_enabled = enabled && status.enabled;
+    system::save_settings(&state.data_dir, &settings)?;
+    Ok(status)
+}
+
+/// Lets a device waiting to join play; it is remembered.
+#[tauri::command]
+async fn allow_network_device(key: String, state: State<'_, AppState>) -> CmdResult<()> {
+    network_key(&key)?;
+    state
+        .engine
+        .allow_network_device(key)
+        .map_err(engine_error)?;
+    system::save_network_joins(&state);
+    Ok(())
+}
+
+#[tauri::command]
+async fn deny_network_device(key: String, state: State<'_, AppState>) -> CmdResult<()> {
+    network_key(&key)?;
+    state.engine.deny_network_device(key).map_err(engine_error)
+}
+
+/// Renames a joined network device (1 to 40 characters).
+#[tauri::command]
+async fn rename_network_device(
+    key: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    network_key(&key)?;
+    let name = name.trim().to_string();
+    if name.is_empty() || name.chars().count() > 40 || name.chars().any(char::is_control) {
+        return Err(CommandError::new(
+            "invalid_name",
+            "A name needs 1 to 40 characters",
+        ));
+    }
+    // Pick up a device that joined since the last poll, so the rename is saved.
+    system::save_network_joins(&state);
+    state
+        .engine
+        .rename_network_device(key.clone(), name.clone())
+        .map_err(engine_error)?;
+    let mut settings = state.settings.lock().unwrap();
+    if let Some(device) = settings.network_devices.iter_mut().find(|d| d.key == key) {
+        device.name = name;
+    }
+    system::save_settings(&state.data_dir, &settings)
+}
+
+/// Removes a network device from the engine and the saved list; it has to be
+/// allowed again (or scan the QR code) to rejoin.
+#[tauri::command]
+async fn forget_network_device(key: String, state: State<'_, AppState>) -> CmdResult<()> {
+    network_key(&key)?;
+    system::save_network_joins(&state);
+    let result = state.engine.forget_network_device(key.clone());
+    if let Err(error) = &result {
+        // Busy (calibrating) or no engine: keep it saved and say why.
+        if !matches!(error, EngineError::UnknownEndpoint(_)) {
+            return result.map_err(engine_error);
+        }
+    }
+    let mut settings = state.settings.lock().unwrap();
+    let before = settings.network_devices.len();
+    settings.network_devices.retain(|d| d.key != key);
+    if settings.network_devices.len() != before {
+        system::save_settings(&state.data_dir, &settings)?;
+        // Saved but unknown to the engine: still forgotten here.
+        return Ok(());
+    }
+    result.map_err(engine_error)
 }
 
 #[tauri::command]
@@ -776,6 +879,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_audio_devices,
             get_engine_status,
+            set_network,
+            allow_network_device,
+            deny_network_device,
+            rename_network_device,
+            forget_network_device,
             start_audio_engine,
             stop_audio_engine,
             select_capture_source,

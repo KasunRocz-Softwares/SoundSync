@@ -105,6 +105,7 @@ enum Command {
     AllowNetworkDevice(String, Reply<()>),
     DenyNetworkDevice(String, Reply<()>),
     RenameNetworkDevice(String, String, Reply<()>),
+    ForgetNetworkDevice(String, Reply<()>),
     TakeNetworkJoins(Reply<Vec<NetworkDevice>>),
     Shutdown,
 }
@@ -321,6 +322,11 @@ impl AudioEngine {
     /// Renames an allowed network device (1 to 40 characters).
     pub fn rename_network_device(&self, key: String, name: String) -> Result<(), EngineError> {
         self.call(|r| Command::RenameNetworkDevice(key, name, r))
+    }
+    /// Forgets an allowed network device: it is disconnected, its output is
+    /// removed, and it has to be allowed again to rejoin.
+    pub fn forget_network_device(&self, key: String) -> Result<(), EngineError> {
+        self.call(|r| Command::ForgetNetworkDevice(key, r))
     }
     /// Devices newly allowed (by QR code or Allow) since the last call, for
     /// the app to save. Each device is returned once.
@@ -852,13 +858,14 @@ impl Core {
             Command::AllowNetworkDevice(key, reply) => {
                 let result = match &self.net.server {
                     Some(server) => {
-                        let name = server
-                            .pending()
-                            .into_iter()
-                            .find(|p| p.key == key)
-                            .map(|p| p.name);
-                        server.allow(&key);
-                        Ok(name)
+                        match server.pending().into_iter().find(|p| p.key == key) {
+                            Some(p) => {
+                                server.allow(&key);
+                                Ok(Some(p.name))
+                            }
+                            // Gone (left, denied or already allowed): say so.
+                            None => Err(EngineError::UnknownEndpoint(endpoint_id(&key))),
+                        }
                     }
                     None => Err(EngineError::Platform("Network speakers are off".into())),
                 };
@@ -873,10 +880,11 @@ impl Core {
             }
             Command::DenyNetworkDevice(key, reply) => {
                 let result = match &self.net.server {
-                    Some(server) => {
+                    Some(server) if server.pending().iter().any(|p| p.key == key) => {
                         server.deny(&key);
                         Ok(())
                     }
+                    Some(_) => Err(EngineError::UnknownEndpoint(endpoint_id(&key))),
                     None => Err(EngineError::Platform("Network speakers are off".into())),
                 };
                 let _ = reply.send(result);
@@ -893,6 +901,9 @@ impl Core {
                     Err(EngineError::UnknownEndpoint(endpoint_id(&key)))
                 };
                 let _ = reply.send(result);
+            }
+            Command::ForgetNetworkDevice(key, reply) => {
+                let _ = reply.send(self.forget_network_device(&key));
             }
             Command::TakeNetworkJoins(reply) => {
                 let _ = reply.send(Ok(std::mem::take(&mut self.net.joins)));
@@ -1387,7 +1398,11 @@ impl Core {
                     self.net.error = Some(message);
                 }
             }
-        } else if !enabled && self.net.server.is_some() {
+        } else if !enabled {
+            // Also clears an error left by a failed start.
+            self.net.error = None;
+        }
+        if !enabled && self.net.server.is_some() {
             let ids: Vec<String> = self
                 .outputs
                 .keys()
@@ -1408,6 +1423,39 @@ impl Core {
             }
         }
         self.merge_network();
+    }
+
+    /// Removes an allowed device everywhere: server, device list, output slot
+    /// and endpoint. Works while the server is off too (saved devices).
+    fn forget_network_device(&mut self, key: &str) -> Result<(), EngineError> {
+        let id = endpoint_id(key);
+        let known = self.net.devices.iter().any(|d| d.key == key);
+        let pending = self
+            .net
+            .server
+            .as_ref()
+            .is_some_and(|s| s.pending().iter().any(|p| p.key == key));
+        if !known && !pending {
+            return Err(EngineError::UnknownEndpoint(id));
+        }
+        if self.calibration.is_some() && self.outputs.contains_key(&id) {
+            return Err(EngineError::Platform(
+                "Wait for calibration to finish before forgetting a speaker".into(),
+            ));
+        }
+        if let Some(server) = &self.net.server {
+            server.forget(key);
+        }
+        self.net.devices.retain(|d| d.key != key);
+        self.net.joins.retain(|d| d.key != key);
+        if self.outputs.contains_key(&id) {
+            self.stop_output(&id);
+            self.outputs.remove(&id);
+            self.sync_capture_routes();
+            self.recompute_placement();
+        }
+        self.merge_network();
+        Ok(())
     }
 
     /// Applies server events: joins become outputs (and start while routing

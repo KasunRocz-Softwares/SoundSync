@@ -63,6 +63,11 @@
     "allow-ab-recall",
     "allow-export-settings",
     "allow-import-settings",
+    "allow-set-network",
+    "allow-allow-network-device",
+    "allow-deny-network-device",
+    "allow-rename-network-device",
+    "allow-forget-network-device",
     "autostart:default"
   ]
 }

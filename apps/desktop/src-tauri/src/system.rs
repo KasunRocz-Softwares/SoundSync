@@ -10,6 +10,7 @@ use syncsound_engine::commands::CommandError;
 use syncsound_engine::platform::windows_default::{
     default_render_id, is_virtual_cable, set_default_render,
 };
+use syncsound_engine::net::NetworkDevice;
 use syncsound_engine::profile::{Profile, PROFILE_SCHEMA_VERSION};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -33,6 +34,10 @@ pub struct AppSettings {
     pub hotkeys: bool,
     /// Which keys run which action (see `workflow::HotkeyBinding`).
     pub hotkey_bindings: Vec<crate::workflow::HotkeyBinding>,
+    /// Network speakers server on (phones, TVs and PCs on the home Wi-Fi).
+    pub network_enabled: bool,
+    /// Network devices allowed to play, remembered so they rejoin without asking.
+    pub network_devices: Vec<NetworkDevice>,
 }
 
 impl Default for AppSettings {
@@ -44,6 +49,8 @@ impl Default for AppSettings {
             virtual_speaker: None,
             hotkeys: true,
             hotkey_bindings: crate::workflow::default_bindings(),
+            network_enabled: false,
+            network_devices: Vec::new(),
         }
     }
 }
@@ -93,6 +100,11 @@ pub fn save_last_session(state: &AppState) {
 /// Restores the last session (and optionally starts routing) on launch.
 pub fn restore_last_session(state: &AppState) {
     let settings = state.settings.lock().unwrap().clone();
+    // Saved network devices first: their `net:` outputs only exist once the
+    // engine knows them, so the profile below can restore their settings.
+    let _ = state
+        .engine
+        .set_network(settings.network_enabled, settings.network_devices.clone());
     if settings.restore_last_session {
         if let Ok(text) = std::fs::read_to_string(last_session_path(&state.data_dir)) {
             if let Ok(profile) = Profile::from_json(&text) {
@@ -110,6 +122,22 @@ pub fn restore_last_session(state: &AppState) {
     } else if settings.auto_start_routing {
         let _ = state.engine.start();
     }
+}
+
+/// Saves network devices the engine allowed since the last call (QR joins and
+/// Allow), so they are remembered. Cheap: called on every UI poll.
+pub fn save_network_joins(state: &AppState) {
+    let joins = state.engine.take_network_joins();
+    if joins.is_empty() {
+        return;
+    }
+    let mut settings = state.settings.lock().unwrap();
+    for device in joins {
+        if !settings.network_devices.iter().any(|d| d.key == device.key) {
+            settings.network_devices.push(device);
+        }
+    }
+    let _ = save_settings(&state.data_dir, &settings);
 }
 
 /// Saves the session every 30 s so a crash or power cut loses little.
@@ -375,4 +403,33 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_settings_default_off_and_round_trip() {
+        let defaults = AppSettings::default();
+        assert!(!defaults.network_enabled);
+        assert!(defaults.network_devices.is_empty());
+
+        let mut settings = AppSettings::default();
+        settings.network_enabled = true;
+        settings.network_devices = vec![NetworkDevice {
+            key: "0123456789abcdef0123456789abcdef".into(),
+            name: "Living room TV".into(),
+        }];
+        let text = serde_json::to_string(&settings).unwrap();
+        let back: AppSettings = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, settings);
+
+        // Settings saved by an older version have no network fields.
+        let old = r#"{"restore_last_session":false,"auto_start_routing":true,"close_to_tray":false}"#;
+        let loaded: AppSettings = serde_json::from_str(old).unwrap();
+        assert!(!loaded.restore_last_session);
+        assert!(!loaded.network_enabled);
+        assert!(loaded.network_devices.is_empty());
+    }
 }

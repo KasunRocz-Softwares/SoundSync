@@ -224,6 +224,23 @@ impl NetworkServer {
         }
     }
 
+    /// Forgets a device: it is no longer allowed, its link is dropped and any
+    /// open or waiting socket is closed. Opening the page again makes it wait
+    /// for Allow (or scan a fresh QR code). No `Left` event is emitted.
+    pub fn forget(&self, key: &str) {
+        let mut st = self.shared.lock();
+        st.allowed.remove(key);
+        st.pending.retain(|p| p.key != key);
+        if let Some(link) = st.links.remove(key) {
+            link.set_connected(false);
+        }
+        let conns: Vec<Conn> = [st.current.remove(key), st.waiting.remove(key)].into_iter().flatten().collect();
+        // Its connection thread sees CTL_CLOSE within one poll and closes the socket.
+        for conn in conns {
+            conn.ctl.store(CTL_CLOSE, Ordering::Release);
+        }
+    }
+
     /// Returns and clears the events since the last call.
     pub fn events(&self) -> Vec<ServerEvent> {
         std::mem::take(&mut self.shared.lock().events)
@@ -897,6 +914,26 @@ mod tests {
         assert!(closed(&mut ws));
         assert!(server.pending().is_empty());
         assert!(server.link(KEY_A).is_none());
+    }
+
+    #[test]
+    fn forget_disconnects_and_asks_again() {
+        let server = NetworkServer::start(vec![device(KEY_A)], 0).unwrap();
+        let mut ws = connect(&server);
+        assert_eq!(hello(&mut ws, KEY_A, None)["state"], "playing");
+        let link = server.link(KEY_A).unwrap();
+        server.forget(KEY_A);
+        assert!(closed(&mut ws), "the forgotten device's socket is closed");
+        assert!(server.link(KEY_A).is_none());
+        assert!(!link.connected());
+        // Opening the page again no longer joins: it waits for Allow.
+        let mut again = connect(&server);
+        assert_eq!(hello(&mut again, KEY_A, None)["state"], "waiting");
+        assert!(wait_until(|| server.pending().iter().any(|p| p.key == KEY_A)));
+        // Forgetting a waiting device drops it from the list and closes it.
+        server.forget(KEY_A);
+        assert!(server.pending().is_empty());
+        assert!(closed(&mut again));
     }
 
     #[test]
