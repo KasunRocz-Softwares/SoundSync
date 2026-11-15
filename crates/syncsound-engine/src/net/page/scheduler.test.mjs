@@ -25,9 +25,14 @@ test("rate speeds up when buffered over target", () => {
   const s = createScheduler({ targetMs: 150 });
   s.enqueue(1, 0, 10);
   let r;
-  // 150 ms lead plus 7 queued chunks: about 300 ms buffered by the last one.
-  for (let seq = 2; seq <= 9; seq++) r = s.enqueue(seq, 0, 10);
-  assert.ok(s.bufferedMs(10) > 300, `buffered ${s.bufferedMs(10)}`);
+  let t = 10;
+  // Chunks arrive every 6 ms (faster than they play, but not a burst), so
+  // the schedule grows by about 14 ms each time until it is near 300 ms.
+  for (let seq = 2; seq <= 11; seq++) {
+    t += 0.006;
+    r = s.enqueue(seq, 0, t);
+  }
+  assert.ok(s.bufferedMs(t) > 300, `buffered ${s.bufferedMs(t)}`);
   assert.ok(r.playbackRate > 1, `rate ${r.playbackRate}`);
   assert.ok(r.playbackRate <= 1.001, `rate ${r.playbackRate}`);
 });
@@ -87,7 +92,34 @@ test("burst far over target is trimmed", () => {
   for (let seq = 2; seq <= 40; seq++) if (s.enqueue(seq, 0, 10) === null) dropped++;
   assert.ok(dropped > 0, "some chunks are dropped");
   assert.ok(s.bufferedMs(10) <= 2 * 150 + 100 + 20, `buffered ${s.bufferedMs(10)}`);
-  // Dropping does not restart the schedule: the next chunk still follows on.
-  const r = s.enqueue(41, 0, 10.2);
-  assert.ok(r !== null && r.startAt > 10.2 + 0.15 + 0.02, `start ${r && r.startAt}`);
+  // Dropping does not restart the schedule: the next chunk still follows on
+  // (a resync would start it at 10.1 + 0.15).
+  const r = s.enqueue(41, 0, 10.1);
+  assert.ok(r !== null && r.startAt < 10.1 + 0.15 - 0.01, `start ${r && r.startAt}`);
+});
+
+test("burst after a stall settles near the target", () => {
+  const s = createScheduler({ targetMs: 150 });
+  s.enqueue(1, 0, 10);
+  // Wi-Fi stalls for a second, then the PC flushes 30 queued chunks at once.
+  for (let seq = 2; seq <= 31; seq++) s.enqueue(seq, 0, 11);
+  assert.ok(s.bufferedMs(11) >= 150, `buffered ${s.bufferedMs(11)}`);
+  assert.ok(s.bufferedMs(11) <= 150 + 40 + 0.5, `buffered ${s.bufferedMs(11)}`);
+  assert.ok(s.latencyMs(11, 0) <= 150 + 40 + 0.5, `latency ${s.latencyMs(11, 0)}`);
+});
+
+test("a 260 ms gap with a 300 ms target does not resync", () => {
+  const s = createScheduler({ targetMs: 300 });
+  near(s.enqueue(1, 0, 10).startAt, 10.3);
+  near(s.enqueue(2, 0, 10.26).startAt, 10.32);
+});
+
+test("a close pair in steady playback is kept", () => {
+  const s = createScheduler({ targetMs: 150 });
+  s.enqueue(1, 0, 10);
+  s.enqueue(2, 0, 10.015); // a normal gap ends the start-up burst
+  // The audio clock is coarse: two chunks often read the same time.
+  const r = s.enqueue(3, 0, 10.015);
+  assert.ok(r !== null, "not dropped");
+  near(r.startAt, 10.19);
 });
