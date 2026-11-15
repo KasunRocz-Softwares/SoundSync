@@ -16,6 +16,12 @@ use crate::enhance::{self, AppMode, ListeningMode, SoundSettings};
 use crate::routing::OutputSpectrum;
 use crate::eq::{design, EqSettings};
 use crate::mixer::TimelineMixer;
+use crate::net::server::{NetworkServer, ServerEvent};
+use crate::net::worker::NetworkWorker;
+use crate::net::{
+    endpoint_id, key_of, merge_network_endpoints, qr_svg, NetworkDevice, NetworkStatus,
+    DEFAULT_PORT,
+};
 use crate::output_state::{OutputLifecycle, OutputLifecycleState};
 use crate::placement::{
     apply_preset, compute_placement, SoundPreset, SpeakerPosition, MIN_TRIM_DB,
@@ -95,6 +101,11 @@ enum Command {
     MeasureRoom(String, Reply<RoomReport>),
     ApplyPreset(SoundPreset, Reply<()>),
     Refresh(Reply<Vec<AudioEndpoint>>),
+    SetNetwork(bool, Vec<NetworkDevice>, Reply<NetworkStatus>),
+    AllowNetworkDevice(String, Reply<()>),
+    DenyNetworkDevice(String, Reply<()>),
+    RenameNetworkDevice(String, String, Reply<()>),
+    TakeNetworkJoins(Reply<Vec<NetworkDevice>>),
     Shutdown,
 }
 
@@ -289,6 +300,33 @@ impl AudioEngine {
     pub fn apply_preset(&self, preset: SoundPreset) -> Result<(), EngineError> {
         self.call(|r| Command::ApplyPreset(preset, r))
     }
+    /// Turns the network speaker server on or off. `allowed` are the devices
+    /// saved by the app; while the server is already on, only their names
+    /// are updated (the server keeps running).
+    pub fn set_network(
+        &self,
+        enabled: bool,
+        allowed: Vec<NetworkDevice>,
+    ) -> Result<NetworkStatus, EngineError> {
+        self.call(|r| Command::SetNetwork(enabled, allowed, r))
+    }
+    /// Lets a device waiting to join start playing.
+    pub fn allow_network_device(&self, key: String) -> Result<(), EngineError> {
+        self.call(|r| Command::AllowNetworkDevice(key, r))
+    }
+    /// Refuses a device waiting to join.
+    pub fn deny_network_device(&self, key: String) -> Result<(), EngineError> {
+        self.call(|r| Command::DenyNetworkDevice(key, r))
+    }
+    /// Renames an allowed network device (1 to 40 characters).
+    pub fn rename_network_device(&self, key: String, name: String) -> Result<(), EngineError> {
+        self.call(|r| Command::RenameNetworkDevice(key, name, r))
+    }
+    /// Devices newly allowed (by QR code or Allow) since the last call, for
+    /// the app to save. Each device is returned once.
+    pub fn take_network_joins(&self) -> Vec<NetworkDevice> {
+        self.call(Command::TakeNetworkJoins).unwrap_or_default()
+    }
 }
 
 impl Drop for AudioEngine {
@@ -302,13 +340,86 @@ impl Drop for AudioEngine {
     }
 }
 
+/// The thread playing one output: a WASAPI render stream or a network speaker.
+enum OutputWorker {
+    Wasapi(RenderWorker),
+    Network(NetworkWorker),
+}
+
+impl OutputWorker {
+    fn poll(&self) -> WorkerPoll {
+        match self {
+            OutputWorker::Wasapi(worker) => worker.poll(),
+            OutputWorker::Network(worker) => worker.poll(),
+        }
+    }
+}
+
+/// Network speaker state owned by the control thread.
+#[derive(Default)]
+struct NetState {
+    server: Option<NetworkServer>,
+    /// Allowed devices (key and display name); the source of names.
+    devices: Vec<NetworkDevice>,
+    /// Newly allowed devices not yet handed to the app.
+    joins: Vec<NetworkDevice>,
+    /// Last QR code: the URL it encodes and its SVG.
+    qr: Option<(String, String)>,
+    error: Option<String>,
+}
+
+impl NetState {
+    fn connected(&self, key: &str) -> bool {
+        self.server
+            .as_ref()
+            .and_then(|s| s.link(key))
+            .is_some_and(|link| link.connected())
+    }
+
+    /// Records a newly allowed device once; known devices keep their name.
+    fn learn(&mut self, key: &str, name: &str) -> bool {
+        if self.devices.iter().any(|d| d.key == key) {
+            return false;
+        }
+        let device = NetworkDevice {
+            key: key.into(),
+            name: name.into(),
+        };
+        self.devices.push(device.clone());
+        self.joins.push(device);
+        true
+    }
+
+    /// Status for the snapshot; regenerates the QR code only when its URL changed.
+    fn status(&mut self) -> NetworkStatus {
+        let Some(server) = &self.server else {
+            self.qr = None;
+            return NetworkStatus {
+                error: self.error.clone(),
+                ..NetworkStatus::default()
+            };
+        };
+        let qr_url = server.qr_url();
+        if self.qr.as_ref().map(|(url, _)| url) != Some(&qr_url) {
+            self.qr = qr_svg(&qr_url).map(|svg| (qr_url, svg));
+        }
+        NetworkStatus {
+            enabled: true,
+            url: Some(server.url()),
+            qr_svg: self.qr.as_ref().map(|(_, svg)| svg.clone()),
+            pending: server.pending(),
+            error: self.error.clone(),
+        }
+    }
+}
+
 struct OutputSlot {
     config: OutputConfig,
     controls: Arc<OutputControls>,
     metrics: Arc<OutputMetrics>,
     lifecycle: OutputLifecycle,
     producer: Option<PcmProducer>,
-    worker: Option<RenderWorker>,
+    worker: Option<OutputWorker>,
     published_eq: Option<EqSettings>,
     published_enhance: Option<(EqSettings, SoundSettings)>,
     /// Last impulse-response load: taps, or the error to show.
@@ -390,6 +501,7 @@ struct Core {
     last_snapshot: Instant,
     last_align: Instant,
     shared: Arc<Mutex<EngineSnapshot>>,
+    net: NetState,
     // Declared last: dropped after captures/workers so its COM apartment outlives them.
     catalog: EndpointCatalog,
 }
@@ -433,6 +545,7 @@ impl Core {
             last_snapshot: now - SNAPSHOT_INTERVAL,
             last_align: now,
             shared,
+            net: NetState::default(),
             catalog,
         })
     }
@@ -479,6 +592,15 @@ impl Core {
             .collect()
     }
 
+    /// Enabled outputs that are local render endpoints. Network speakers stay
+    /// out of the feedback guard: loopback capture never hears them.
+    fn render_ids(&self) -> Vec<String> {
+        self.enabled_ids()
+            .into_iter()
+            .filter(|id| key_of(id).is_none())
+            .collect()
+    }
+
     fn slot(&mut self, id: &str) -> Result<&mut OutputSlot, EngineError> {
         if !self.outputs.contains_key(id) {
             if !self.endpoints.iter().any(|e| e.id == id) {
@@ -520,7 +642,8 @@ impl Core {
             }
             Command::SetSource(source, reply) => {
                 if let CaptureSource::Endpoint(id) = &source {
-                    if !self.endpoints.iter().any(|e| &e.id == id) {
+                    // A network speaker only plays; there is nothing to capture from it.
+                    if key_of(id).is_some() || !self.endpoints.iter().any(|e| &e.id == id) {
                         let _ = reply.send(Err(EngineError::UnknownEndpoint(id.clone())));
                         return;
                     }
@@ -652,8 +775,10 @@ impl Core {
             }
             Command::SetOutputAdvanced(id, advanced, reply) => {
                 let running = self.running;
+                let network = key_of(&id).is_some();
                 let result = self.slot(&id).map(|slot| {
-                    let reopen = slot.config.exclusive != advanced.exclusive;
+                    // Exclusive mode means nothing for a network speaker.
+                    let reopen = !network && slot.config.exclusive != advanced.exclusive;
                     let reload = slot.config.convolution != advanced.convolution;
                     slot.config.source_channels = advanced.source_channels;
                     slot.config.exclusive = advanced.exclusive;
@@ -719,6 +844,58 @@ impl Core {
             Command::Refresh(reply) => {
                 self.refresh_endpoints();
                 let _ = reply.send(Ok(self.endpoints.clone()));
+            }
+            Command::SetNetwork(enabled, allowed, reply) => {
+                self.set_network(enabled, allowed);
+                let _ = reply.send(Ok(self.net.status()));
+            }
+            Command::AllowNetworkDevice(key, reply) => {
+                let result = match &self.net.server {
+                    Some(server) => {
+                        let name = server
+                            .pending()
+                            .into_iter()
+                            .find(|p| p.key == key)
+                            .map(|p| p.name);
+                        server.allow(&key);
+                        Ok(name)
+                    }
+                    None => Err(EngineError::Platform("Network speakers are off".into())),
+                };
+                // Remember it now so it is saved even if it leaves before playing.
+                if let Ok(Some(name)) = &result {
+                    if self.net.learn(&key, name) {
+                        self.add_network_output(&key);
+                    }
+                    self.merge_network();
+                }
+                let _ = reply.send(result.map(|_| ()));
+            }
+            Command::DenyNetworkDevice(key, reply) => {
+                let result = match &self.net.server {
+                    Some(server) => {
+                        server.deny(&key);
+                        Ok(())
+                    }
+                    None => Err(EngineError::Platform("Network speakers are off".into())),
+                };
+                let _ = reply.send(result);
+            }
+            Command::RenameNetworkDevice(key, name, reply) => {
+                let name = name.trim().to_string();
+                let result = if name.is_empty() || name.chars().count() > 40 {
+                    Err(EngineError::Platform("A name needs 1 to 40 characters".into()))
+                } else if let Some(device) = self.net.devices.iter_mut().find(|d| d.key == key) {
+                    device.name = name;
+                    self.merge_network();
+                    Ok(())
+                } else {
+                    Err(EngineError::UnknownEndpoint(endpoint_id(&key)))
+                };
+                let _ = reply.send(result);
+            }
+            Command::TakeNetworkJoins(reply) => {
+                let _ = reply.send(Ok(std::mem::take(&mut self.net.joins)));
             }
             Command::Shutdown => {}
         }
@@ -986,7 +1163,7 @@ impl Core {
                         pid: app.pid,
                     },
                     format: self.format,
-                    output_endpoint_ids: self.enabled_ids(),
+                    output_endpoint_ids: self.render_ids(),
                     ..CaptureConfig::default()
                 };
                 match LoopbackCapture::new(config) {
@@ -1010,7 +1187,7 @@ impl Core {
         let config = CaptureConfig {
             source: self.source.clone(),
             format: self.format,
-            output_endpoint_ids: self.enabled_ids(),
+            output_endpoint_ids: self.render_ids(),
             ..CaptureConfig::default()
         };
         match LoopbackCapture::new(config) {
@@ -1027,7 +1204,7 @@ impl Core {
 
     /// Feedback guard: the capture must know every output BEFORE a render stream opens.
     fn sync_capture_routes(&mut self) {
-        let ids = self.enabled_ids();
+        let ids = self.render_ids();
         for app in &mut self.app_captures {
             let _ = app.capture.set_output_endpoints(ids.clone());
         }
@@ -1055,9 +1232,26 @@ impl Core {
         ) {
             slot.lifecycle.enable();
         }
+        let network = key_of(id).is_some();
+        let link = if network {
+            match key_of(id).and_then(|key| self.net.server.as_ref()?.link(key)) {
+                Some(link) => Some(link),
+                None => {
+                    slot.lifecycle
+                        .failed(Instant::now(), "Network speakers are off");
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         if !active {
-            slot.lifecycle
-                .failed(Instant::now(), "Endpoint is unplugged or disabled");
+            let error = if network {
+                "Disconnected"
+            } else {
+                "Endpoint is unplugged or disabled"
+            };
+            slot.lifecycle.failed(Instant::now(), error);
             return;
         }
         let max_block = CaptureConfig::default().max_block_frames;
@@ -1091,14 +1285,22 @@ impl Core {
             channels: crate::render::OUTPUT_CHANNELS as u16,
         };
         let exclusive = slot.config.exclusive;
-        slot.worker = Some(RenderWorker::spawn(
-            id.into(),
-            pipeline,
-            render_format,
-            policy.render_buffer_hns,
-            slot.metrics.clone(),
-            exclusive,
-        ));
+        slot.worker = Some(match link {
+            Some(link) => OutputWorker::Network(NetworkWorker::spawn(
+                pipeline,
+                format.sample_rate,
+                link,
+                slot.metrics.clone(),
+            )),
+            None => OutputWorker::Wasapi(RenderWorker::spawn(
+                id.into(),
+                pipeline,
+                render_format,
+                policy.render_buffer_hns,
+                slot.metrics.clone(),
+                exclusive,
+            )),
+        });
         // A new pipeline starts without a convolver: hand it one again.
         self.load_convolver(id);
     }
@@ -1141,12 +1343,125 @@ impl Core {
         }
     }
 
+    /// Rebuilds the `net:` endpoints from the allowed devices and their links.
+    fn merge_network(&mut self) {
+        let net = &self.net;
+        merge_network_endpoints(&mut self.endpoints, &net.devices, &|key: &str| net.connected(key));
+    }
+
+    /// Gives a device that has no output yet (first join) one, switched on
+    /// when there is room. An existing output (from a profile, or one the
+    /// user turned off) is left as it is.
+    fn add_network_output(&mut self, key: &str) {
+        let id = endpoint_id(key);
+        if self.outputs.contains_key(&id) {
+            return;
+        }
+        let room = self.enabled_ids().len() < MAX_ENABLED_OUTPUTS;
+        self.merge_network();
+        if let Ok(slot) = self.slot(&id) {
+            slot.config.enabled = room;
+        }
+        if room {
+            self.recompute_placement();
+        }
+    }
+
+    fn set_network(&mut self, enabled: bool, allowed: Vec<NetworkDevice>) {
+        // The app's list wins for names; devices learned since stay listed.
+        for device in allowed {
+            match self.net.devices.iter_mut().find(|d| d.key == device.key) {
+                Some(known) => known.name = device.name,
+                None => self.net.devices.push(device),
+            }
+        }
+        if enabled && self.net.server.is_none() {
+            match NetworkServer::start(self.net.devices.clone(), DEFAULT_PORT) {
+                Ok(server) => {
+                    self.net.server = Some(server);
+                    self.net.error = None;
+                }
+                Err(error) => {
+                    let message = format!("Could not start network speakers: {error}");
+                    self.record("network", message.clone());
+                    self.net.error = Some(message);
+                }
+            }
+        } else if !enabled && self.net.server.is_some() {
+            let ids: Vec<String> = self
+                .outputs
+                .keys()
+                .filter(|id| key_of(id).is_some())
+                .cloned()
+                .collect();
+            for id in &ids {
+                self.stop_output(id);
+            }
+            self.net.server = None; // Drop stops the server and closes every socket.
+            self.net.qr = None;
+            self.net.error = None;
+            let now = Instant::now();
+            for id in &ids {
+                if let Some(slot) = self.outputs.get_mut(id) {
+                    slot.lifecycle.failed(now, "Network speakers are off");
+                }
+            }
+        }
+        self.merge_network();
+    }
+
+    /// Applies server events: joins become outputs (and start while routing
+    /// runs), leaves mark the output disconnected. Other outputs are untouched.
+    fn service_network(&mut self) {
+        let Some(server) = &self.net.server else {
+            return;
+        };
+        let events = server.events();
+        if events.is_empty() {
+            return;
+        }
+        // Endpoint states first, so start_output sees who is connected now.
+        let mut joined = Vec::new();
+        for event in &events {
+            if let ServerEvent::Joined { key, name } = event {
+                self.net.learn(key, name);
+                joined.push(key.clone());
+            }
+        }
+        self.merge_network();
+        for key in joined {
+            self.add_network_output(&key);
+        }
+        for event in events {
+            match event {
+                ServerEvent::Joined { key, .. } => {
+                    let id = endpoint_id(&key);
+                    if self.running && self.outputs.get(&id).is_some_and(|s| s.config.enabled) {
+                        self.stop_output(&id);
+                        self.start_output(&id);
+                    }
+                }
+                ServerEvent::Left { key } => {
+                    let id = endpoint_id(&key);
+                    if self.outputs.contains_key(&id) {
+                        self.stop_output(&id);
+                        if let Some(slot) = self.outputs.get_mut(&id) {
+                            slot.lifecycle.failed(Instant::now(), "Disconnected");
+                        }
+                    }
+                }
+                ServerEvent::Pending(_) => {}
+            }
+        }
+    }
+
     fn refresh_endpoints(&mut self) {
         self.catalog.changed.store(false, Ordering::Release);
         match self.catalog.enumerate() {
             Ok(endpoints) => self.endpoints = endpoints,
             Err(error) => self.record("endpoints", error.to_string()),
         }
+        self.merge_network();
         let now = Instant::now();
         let active: Vec<String> = self
             .endpoints
@@ -1165,6 +1480,7 @@ impl Core {
         if self.catalog.changed.load(Ordering::Acquire) {
             self.refresh_endpoints();
         }
+        self.service_network();
         self.service_spectrum();
         // Free convolvers the render threads have swapped out.
         for slot in self.outputs.values() {
@@ -1718,6 +2034,7 @@ impl Core {
             endpoints: self.endpoints.clone(),
             recent_errors: self.errors.iter().cloned().collect(),
             updated_at_ms: self.started.elapsed().as_millis() as u64,
+            network: self.net.status(),
         };
         if let Ok(mut shared) = self.shared.lock() {
             *shared = snapshot;

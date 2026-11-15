@@ -204,6 +204,9 @@ pub struct EngineSnapshot {
     pub endpoints: Vec<AudioEndpoint>,
     pub recent_errors: Vec<ErrorRecord>,
     pub updated_at_ms: u64,
+    /// Network speakers: server state, join QR code and devices waiting to join.
+    #[serde(default)]
+    pub network: crate::net::NetworkStatus,
 }
 
 impl EngineSnapshot {
@@ -226,6 +229,7 @@ impl EngineSnapshot {
             endpoints: Vec::new(),
             recent_errors: Vec::new(),
             updated_at_ms: 0,
+            network: crate::net::NetworkStatus::default(),
         }
     }
 }
