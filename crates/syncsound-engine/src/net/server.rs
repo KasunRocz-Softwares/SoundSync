@@ -483,6 +483,20 @@ fn poll(ws: &mut WebSocket<TcpStream>) -> Polled {
     }
 }
 
+/// This computer's name for the page's status line, at most 40 characters.
+fn pc_name() -> String {
+    pc_name_from(std::env::var("COMPUTERNAME").ok())
+}
+
+fn pc_name_from(raw: Option<String>) -> String {
+    let name: String = raw.as_deref().unwrap_or("").trim().chars().filter(|c| !c.is_control()).take(40).collect();
+    if name.is_empty() {
+        "your PC".to_string()
+    } else {
+        name
+    }
+}
+
 fn send_json(ws: &mut WebSocket<TcpStream>, v: Value) -> bool {
     ws.send(Message::Text(v.to_string())).is_ok()
 }
@@ -521,7 +535,7 @@ fn run_device(shared: &Arc<Shared>, mut ws: WebSocket<TcpStream>, peer: SocketAd
         return close(ws);
     }
     if let Admit::Wait = admitted {
-        if !send_json(&mut ws, json!({ "type": "welcome", "name": guessed, "state": "waiting" })) {
+        if !send_json(&mut ws, json!({ "type": "welcome", "name": guessed, "pc": pc_name(), "state": "waiting" })) {
             return forget_waiting(shared, &key, id);
         }
         loop {
@@ -544,7 +558,7 @@ fn run_device(shared: &Arc<Shared>, mut ws: WebSocket<TcpStream>, peer: SocketAd
     }
 
     let (link, name) = join_device(shared, &key, &guessed, id, peer.ip(), &ctl);
-    let welcome = send_json(&mut ws, json!({ "type": "welcome", "name": name, "state": "playing" }));
+    let welcome = send_json(&mut ws, json!({ "type": "welcome", "name": name, "pc": pc_name(), "state": "playing" }));
     if welcome {
         stream_audio(shared, &mut ws, &link, &ctl);
     }
@@ -844,6 +858,7 @@ mod tests {
         let reply = hello(&mut ws, KEY_A, Some(&token_of(&qr)));
         assert_eq!(reply["type"], "welcome");
         assert_eq!(reply["state"], "playing");
+        assert_eq!(reply["pc"], pc_name());
         let ev = events_until(&server, |e| joined(e) == 1);
         assert_eq!(joined(&ev), 1);
         assert!(server.link(KEY_A).is_some());
@@ -857,6 +872,7 @@ mod tests {
         let reply = hello(&mut ws, KEY_A, None);
         assert_eq!(reply["type"], "welcome");
         assert_eq!(reply["state"], "waiting");
+        assert!(reply["pc"].as_str().is_some_and(|pc| !pc.is_empty()));
         let ev = events_until(&server, |e| e.iter().any(|e| matches!(e, ServerEvent::Pending(_))));
         assert!(ev.iter().any(|e| matches!(e, ServerEvent::Pending(p) if p.key == KEY_A)));
         assert_eq!(server.pending().len(), 1);
@@ -1049,6 +1065,14 @@ mod tests {
         assert_eq!(hello(&mut ws, KEY_A, None)["state"], "playing");
         let _ = ws.send(Message::Text("a".repeat(64 * 1024)));
         assert!(closed(&mut ws), "64 KiB text frame closes the socket");
+    }
+
+    #[test]
+    fn pc_name_is_capped_with_a_fallback() {
+        assert_eq!(pc_name_from(Some("KASUN-PC".into())), "KASUN-PC");
+        assert_eq!(pc_name_from(None), "your PC");
+        assert_eq!(pc_name_from(Some("  ".into())), "your PC");
+        assert_eq!(pc_name_from(Some("x".repeat(60))).chars().count(), 40);
     }
 
     #[test]

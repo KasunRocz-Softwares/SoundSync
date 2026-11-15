@@ -2,14 +2,62 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f16">
+<meta name="color-scheme" content="dark">
 <title>SyncSound</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<h1>SyncSound</h1>
-<p>Placeholder page. The real player arrives in a later task.</p>
-<script src="/scheduler.js"></script>
-<script src="/player.js"></script>
+<div class="app" id="app" data-state="idle">
+  <header class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+        <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/>
+      </svg>
+    </span>
+    <span class="brand-name">SyncSound</span>
+  </header>
+
+  <main class="stage">
+    <div class="orb">
+      <span class="ring" aria-hidden="true"></span>
+      <span class="ring ring-late" aria-hidden="true"></span>
+      <button class="play" id="play" type="button" aria-label="Tap to play" autofocus>
+        <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6c0 .8.9 1.3 1.6.8l10.2-6.8a1 1 0 0 0 0-1.6L9.6 4.4C8.9 3.9 8 4.4 8 5.2z"/></svg>
+        <span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      </button>
+    </div>
+    <p class="cta" id="cta">Tap to play</p>
+    <p class="status"><span id="status" role="status">Play your PC's sound here, in sync.</span><span class="latency" id="latency"></span></p>
+    <p class="sub" id="sub"></p>
+    <p class="hint" id="hint">Keep this page open with the screen on.</p>
+  </main>
+
+  <footer class="controls">
+    <div class="buttons">
+      <button class="pill switch" id="weak" type="button" role="switch" aria-checked="false">
+        <span class="track" aria-hidden="true"><span class="knob"></span></span>
+        <span>Weak Wi-Fi</span>
+      </button>
+      <button class="pill stop" id="stop" type="button" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>
+        <span>Stop</span>
+      </button>
+    </div>
+    <p class="device" id="device"></p>
+  </footer>
+</div>
+
+<script nomodule>
+  (function () {
+    var app = document.getElementById("app");
+    app.setAttribute("data-state", "unsupported");
+    document.getElementById("status").innerHTML = "This browser can't play SyncSound audio";
+    document.getElementById("cta").innerHTML = "";
+    document.getElementById("play").disabled = true;
+  })();
+</script>
+<script type="module" src="/player.js"></script>
 </body>
 </html>

@@ -1,2 +1,362 @@
-/* SyncSound page style placeholder. */
-body { font-family: system-ui, sans-serif; margin: 16px; }
+/* SyncSound device page. Dark only, one accent, readable from a sofa.
+   Sizes scale with clamp() from a 320 px phone to a 1920 px TV. */
+
+:root {
+  --bg: #0b0f16;
+  --panel: #131b27;
+  --line: #233041;
+  --text: #e9eef7;
+  --muted: #9ca9bd;
+  --accent: #2fc4ab;
+  --accent-ink: #04241f;
+  --accent-soft: rgba(47, 196, 171, 0.14);
+  --orb: clamp(160px, 28vmin, 300px);
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: clamp(16px, 0.9rem + 0.35vw, 22px);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+.app {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding:
+    max(clamp(20px, 4vh, 56px), env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(clamp(20px, 4vh, 48px), env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  isolation: isolate;
+}
+
+/* Soft teal glow behind the button; brighter while playing. */
+.app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side at 50% 44%, rgba(47, 196, 171, 0.16), rgba(47, 196, 171, 0) 70%) center / 120vmin 120vmin no-repeat;
+  opacity: 0.45;
+  transition: opacity 900ms ease;
+}
+.app[data-state="playing"]::before { opacity: 1; }
+
+/* Brand */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: clamp(1.1rem, 0.85rem + 1vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.mark {
+  display: grid;
+  place-items: center;
+  width: 1.65em;
+  height: 1.65em;
+  border-radius: 0.5em;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.mark svg { width: 62%; height: 62%; }
+
+/* Centre stage */
+.stage {
+  flex: 1;
+  width: 100%;
+  max-width: 34em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: clamp(24px, 5vh, 64px) 0;
+}
+
+.orb {
+  position: relative;
+  width: var(--orb);
+  height: var(--orb);
+  margin-bottom: clamp(18px, 3.5vh, 40px);
+}
+
+.play {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--accent-ink);
+  background: radial-gradient(circle at 50% 30%, #4fd6bf 0%, var(--accent) 55%, #23a891 100%);
+  box-shadow:
+    0 calc(var(--orb) * 0.12) calc(var(--orb) * 0.35) calc(var(--orb) * -0.12) rgba(47, 196, 171, 0.55),
+    inset 0 2px 0 rgba(255, 255, 255, 0.25);
+  transition: transform 160ms ease, background-color 400ms ease, box-shadow 400ms ease;
+  touch-action: manipulation;
+}
+.play:active { transform: scale(0.96); }
+.play:disabled { cursor: default; }
+
+.icon-play {
+  width: 36%;
+  height: 36%;
+  fill: currentColor;
+  transform: translateX(5%);
+}
+
+.bars {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--orb) * 0.035);
+  height: 34%;
+}
+.bars i {
+  display: block;
+  width: calc(var(--orb) * 0.045);
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: 50% 50%;
+  transform: scaleY(0.4);
+}
+.bars i:nth-child(1) { transform: scaleY(0.35); }
+.bars i:nth-child(2) { transform: scaleY(0.7); }
+.bars i:nth-child(3) { transform: scaleY(1); }
+.bars i:nth-child(4) { transform: scaleY(0.6); }
+.bars i:nth-child(5) { transform: scaleY(0.3); }
+
+.ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Any live session swaps the triangle for the bars. */
+.app:not([data-state="idle"]):not([data-state="denied"]):not([data-state="unsupported"]) .icon-play { display: none; }
+.app:not([data-state="idle"]):not([data-state="denied"]):not([data-state="unsupported"]) .bars { display: flex; }
+
+/* Connecting, waiting, reconnecting: a calm panel-coloured button. */
+.app[data-state="connecting"] .play,
+.app[data-state="waiting"] .play,
+.app[data-state="reconnecting"] .play {
+  color: var(--accent);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 2px var(--line), 0 20px 60px -30px rgba(0, 0, 0, 0.8);
+}
+.app[data-state="connecting"] .bars i,
+.app[data-state="waiting"] .bars i,
+.app[data-state="reconnecting"] .bars i { opacity: 0.55; }
+
+.app[data-state="paused"] .play { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 0 transparent; }
+
+.app[data-state="unsupported"] .play {
+  color: var(--muted);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 2px var(--line);
+}
+
+/* Text */
+.cta {
+  margin: 0 0 0.35em;
+  font-size: clamp(1.35rem, 1rem + 1.6vw, 2.6rem);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.cta:empty { display: none; }
+
+.status {
+  margin: 0;
+  font-size: clamp(1.2rem, 0.95rem + 1.25vw, 2.5rem);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  text-wrap: balance;
+}
+.app[data-state="idle"] .status,
+.app[data-state="denied"] .status { color: var(--muted); font-weight: 400; font-size: clamp(1.05rem, 0.9rem + 0.8vw, 1.9rem); }
+
+.latency {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sub {
+  margin: 0.6em 0 0;
+  color: var(--muted);
+  font-size: clamp(1rem, 0.88rem + 0.6vw, 1.6rem);
+}
+.sub:empty { display: none; }
+
+.hint {
+  margin: clamp(18px, 3vh, 36px) 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  color: var(--muted);
+  font-size: clamp(0.95rem, 0.85rem + 0.45vw, 1.45rem);
+}
+.hint::before {
+  content: "";
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.8;
+  flex: none;
+}
+.app[data-state="unsupported"] .hint { display: none; }
+
+/* Quiet controls */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9em;
+}
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75em;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  min-height: 2.75em;
+  padding: 0.55em 1.15em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(19, 27, 39, 0.8);
+  color: var(--muted);
+  font: inherit;
+  font-size: clamp(0.95rem, 0.85rem + 0.45vw, 1.4rem);
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease;
+  touch-action: manipulation;
+}
+.pill:hover { color: var(--text); border-color: #33445a; }
+.pill[hidden] { display: none; }
+.pill svg { width: 1em; height: 1em; fill: currentColor; }
+
+.track {
+  position: relative;
+  width: 2.1em;
+  height: 1.2em;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background-color 200ms ease;
+  flex: none;
+}
+.knob {
+  position: absolute;
+  top: 0.15em;
+  left: 0.15em;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 200ms ease;
+}
+.switch[aria-checked="true"] { color: var(--text); border-color: rgba(47, 196, 171, 0.45); }
+.switch[aria-checked="true"] .track { background: var(--accent); }
+.switch[aria-checked="true"] .knob { transform: translateX(0.9em); background: var(--accent-ink); }
+
+.device {
+  margin: 0;
+  color: var(--muted);
+  opacity: 0.8;
+  font-size: clamp(0.85rem, 0.78rem + 0.35vw, 1.2rem);
+}
+.device:empty { display: none; }
+
+/* Focus for keyboards and TV remotes. Browsers without :focus-visible drop
+   the second rule and keep the outline. */
+button:focus { outline: 3px solid var(--accent); outline-offset: 4px; }
+button:focus:not(:focus-visible) { outline: none; }
+.play:focus { outline-offset: 8px; }
+
+/* Motion, only when the viewer allows it. */
+@media (prefers-reduced-motion: no-preference) {
+  .app[data-state="playing"] .ring { animation: ripple 3s cubic-bezier(0.2, 0.6, 0.3, 1) infinite; }
+  .app[data-state="playing"] .ring-late { animation-delay: 1.5s; }
+  .app[data-state="playing"] .bars i { animation: bar 1.1s ease-in-out infinite alternate; }
+  .app[data-state="playing"] .bars i:nth-child(2) { animation-duration: 0.8s; animation-delay: -0.3s; }
+  .app[data-state="playing"] .bars i:nth-child(3) { animation-duration: 1.3s; animation-delay: -0.6s; }
+  .app[data-state="playing"] .bars i:nth-child(4) { animation-duration: 0.9s; animation-delay: -0.2s; }
+  .app[data-state="playing"] .bars i:nth-child(5) { animation-duration: 1.2s; animation-delay: -0.9s; }
+  .app[data-state="connecting"] .ring,
+  .app[data-state="waiting"] .ring,
+  .app[data-state="reconnecting"] .ring { animation: breathe 2.8s ease-in-out infinite; }
+  .app[data-state="connecting"] .ring-late,
+  .app[data-state="waiting"] .ring-late,
+  .app[data-state="reconnecting"] .ring-late { animation: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app[data-state="playing"] .ring { opacity: 0.3; transform: scale(1.14); }
+  .app[data-state="playing"] .ring-late { opacity: 0.12; transform: scale(1.3); }
+  .app::before, .play, .pill, .knob, .track { transition: none; }
+}
+
+@keyframes ripple {
+  0% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@keyframes bar {
+  0% { transform: scaleY(0.25); }
+  100% { transform: scaleY(1); }
+}
+@keyframes breathe {
+  0%, 100% { transform: scale(1.04); opacity: 0.15; }
+  50% { transform: scale(1.14); opacity: 0.4; }
+}
+
+/* Short landscape screens (phones on their side). */
+@media (max-height: 480px) and (orientation: landscape) {
+  :root { --orb: clamp(120px, 34vh, 180px); }
+  .stage { padding: 12px 0; }
+  .hint { margin-top: 12px; }
+}
+
+/* Off-screen media that keep iOS audio and the screen awake. */
+.keepalive {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 2px;
+  opacity: 0.01;
+  pointer-events: none;
+}
