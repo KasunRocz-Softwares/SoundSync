@@ -183,6 +183,7 @@ details p { padding: 0 0 22px; color: var(--muted); max-width: 64ch; }
 .footer nav { display: flex; gap: 20px; flex-wrap: wrap; }
 .footer a { color: var(--muted); text-decoration: none; }
 .footer a:hover { color: var(--text); }
+.footer .badges { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .footer .alt-badge { display: inline-flex; opacity: .85; transition: opacity .2s; }
 .footer .alt-badge:hover { opacity: 1; }
 .footer .alt-badge img { display: block; height: 36px; width: auto; }

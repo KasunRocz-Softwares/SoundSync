@@ -4,7 +4,7 @@
 
 **[Download the latest release](https://github.com/KasunRocz-Softwares/SoundSync/releases/latest)** (Windows 11 x64) · [Website](https://kasunrocz-softwares.github.io/SoundSync/) · [Code signing policy](docs/CODE_SIGNING.md)
 
-[![SyncSound on AlternativeTo](https://alternativeto.net/static/badges/badge-wide-light.svg)](https://alternativeto.net/software/syncsound/about/?utm_source=badge&utm_medium=referral)
+[![SyncSound on AlternativeTo](https://alternativeto.net/static/badges/badge-wide-light.svg)](https://alternativeto.net/software/syncsound/about/?utm_source=badge&utm_medium=referral) [![SyncSound on Product Hunt](https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1317745&theme=light)](https://www.producthunt.com/products/syncsound?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-syncsound)
 
 | Speaker setup: room map, 7.1 and 8D | Per-speaker equalizer |
 |---|---|
