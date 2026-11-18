@@ -24,7 +24,7 @@
     "author": { "@type": "Organization", "name": "KR Softwares", "url": "https://github.com/KasunRocz-Softwares" }
   }
   </script>
-  <meta name="theme-color" content="#0c1018">
+  <meta name="theme-color" content="#04050a">
   <link rel="icon" type="image/png" href="assets/icon.png">
   <meta property="og:type" content="website">
   <meta property="og:title" content="SyncSound: every speaker, in sync">
@@ -34,9 +34,10 @@
   <meta name="twitter:card" content="summary_large_image">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2">
+  <script type="module" src="kr-hero.js?v=1"></script>
   <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
@@ -52,12 +53,14 @@
         <a href="#how">How it works</a>
         <a href="#faq">FAQ</a>
       </nav>
+      <a class="org" href="https://kasunrocz-softwares.github.io/" title="All KasunRocz Softwares projects">All projects</a>
       <a class="btn btn-sm" href="https://github.com/KasunRocz-Softwares/SoundSync" rel="noopener"><i class="ph ph-github-logo"></i><span>GitHub</span></a>
     </div>
   </header>
 
   <main id="main">
     <section class="hero" id="top">
+      <canvas class="kr-planet" data-kind="waves" data-color="#5cc8ff" aria-hidden="true"></canvas>
       <div class="wrap hero-grid">
         <div class="hero-copy">
           <p class="eyebrow"><span class="dot"></span>Free and open source for Windows 11</p>
@@ -93,7 +96,7 @@
 
     <section class="demo reveal" id="demo">
       <div class="wrap">
-        <div class="section-head">
+        <div data-k="Demo" class="section-head">
           <h2>Hear the gap, then close it</h2>
           <p>A simulation of what reaches your seat. Each bar is a beat. Press Calibrate to see what SyncSound does: it delays the faster speaker until both arrive together.</p>
         </div>
@@ -120,7 +123,7 @@
 
     <section class="features" id="features">
       <div class="wrap">
-        <div class="section-head reveal">
+        <div data-k="Features" class="section-head reveal">
           <h2>Built for the speakers you already have</h2>
           <p>No extra hardware, no account, no cloud. Everything runs on your PC.</p>
         </div>
@@ -204,7 +207,7 @@
 
     <section class="pro" id="pro">
       <div class="wrap">
-        <div class="section-head reveal">
+        <div data-k="Pro tools" class="section-head reveal">
           <h2>Pro tools when you want them</h2>
           <p>Hidden under Advanced, so everyday use stays simple.</p>
         </div>
@@ -224,7 +227,7 @@
 
     <section class="how" id="how">
       <div class="wrap">
-        <div class="section-head reveal"><h2>Set up in three steps</h2></div>
+        <div data-k="How it works" class="section-head reveal"><h2>Set up in three steps</h2></div>
         <ol class="steps">
           <li class="reveal"><span class="step-n">01</span><h3>Install</h3><p>Download the installer and run it. SmartScreen may ask you to confirm while the code-signing certificate is pending.</p></li>
           <li class="reveal"><span class="step-n">02</span><h3>Turn on speakers</h3><p>Switch on the outputs you want on the Routing tab and press Start routing. Optional: add the free VB-CABLE so your default speaker can be delayed too.</p></li>
@@ -235,7 +238,7 @@
 
     <section class="faq" id="faq">
       <div class="wrap faq-grid">
-        <div class="section-head reveal">
+        <div data-k="FAQ" class="section-head reveal">
           <h2>Questions</h2>
           <p>Something else? <a href="https://github.com/KasunRocz-Softwares/SoundSync/issues" rel="noopener">Open an issue</a>.</p>
         </div>
@@ -296,6 +299,7 @@
         <a href="https://github.com/KasunRocz-Softwares/SoundSync/releases" rel="noopener">Releases</a>
         <a href="https://github.com/KasunRocz-Softwares/SoundSync/blob/main/docs/CODE_SIGNING.md" rel="noopener">Code signing policy</a>
         <a href="https://github.com/KasunRocz-Softwares/SoundSync/blob/main/LICENSE" rel="noopener">Licence</a>
+        <a href="https://kasunrocz-softwares.github.io/">More from KasunRocz Softwares</a>
       </nav>
       <div class="badges">
         <a class="alt-badge" href="https://alternativeto.net/software/syncsound/about/?utm_source=badge&amp;utm_medium=referral" rel="noopener" target="_blank">
