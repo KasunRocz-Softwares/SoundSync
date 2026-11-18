@@ -1,5 +1,5 @@
 # Publishes the landing page in site/ to GitHub Pages:
-# https://kasunrocz-softwares.github.io/SoundSync/
+# https://qulaxy.com/SoundSync/
 name: Pages
 on:
   push:

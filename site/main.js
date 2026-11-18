@@ -50,7 +50,7 @@
   // Count one visit per browser session, and only on the real site, not previews.
   const COUNTER = 'https://abacus.jasoncameron.dev';
   const KEY = 'kasunrocz-syncsound/visits';
-  const live = location.hostname.endsWith('github.io');
+  const live = location.hostname.endsWith('github.io') || location.hostname === 'qulaxy.com';
   let counted = false;
   try { counted = sessionStorage.getItem('ss-visit') === '1'; } catch { /* storage blocked */ }
   const action = live && !counted ? 'hit' : 'get';
