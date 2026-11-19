@@ -203,11 +203,21 @@ function start(THREE) {
       // body (data-radius, in scene units) in view at any size; only a faint ring may run off the screen edge.
       const RAD = Number(canvas.dataset.radius) || 3, aspect = w / h;
       const tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+      // data-size="large" keeps the planet big (camera distance 11, or 15 when stacked) and lets it run off
+      // the window's right edge a little; the default keeps the whole body in view.
+      const large = canvas.dataset.size === 'large';
       let z, x, y = 0;
       if (innerWidth > 1080) {
-        z = Math.max(11, RAD / (0.66 * tanH)); // body never taller than ~2/3 of the window
+        z = large ? 11 : Math.max(11, RAD / (0.66 * tanH)); // default: body never taller than ~2/3 of the window
         const halfW = z * tanH * aspect;
-        x = Math.max(0, Math.min(halfW - RAD, halfW * 0.46));
+        x = large
+          ? Math.max(0, Math.min(halfW * 0.46, halfW - RAD * 0.55))
+          : Math.max(0, Math.min(halfW - RAD, halfW * 0.46));
+      } else if (large) {
+        z = 15;
+        const halfW = z * tanH * aspect, halfH = z * tanH;
+        x = halfW * 0.25;
+        y = -halfH * 0.2;
       } else {
         z = Math.max(11, (RAD * 2) / (tanH * aspect));
         const halfW = z * tanH * aspect, halfH = z * tanH;
