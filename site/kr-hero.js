@@ -1,5 +1,5 @@
 // KasunRocz Softwares — shared 3D hero planet for project sites.
-// Usage: <canvas class="kr-planet" data-kind="ring|waves|crystal" data-color="#ffb547" aria-hidden="true"></canvas>
+// Usage: <canvas class="kr-planet" data-kind="ring|waves|crystal|graph" data-color="#ffb547" aria-hidden="true"></canvas>
 // The page works without it: if WebGL or the CDN fails, the canvas simply stays empty.
 const canvas = document.querySelector('canvas.kr-planet');
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -117,6 +117,51 @@ function start(THREE) {
       }
       eq.instanceMatrix.needsUpdate = true; eqPivot.rotation.z = t * .1;
     });
+  } else if (kind === 'graph') {
+    // Dependency graph: a core inside a geodesic network. Nodes are coloured by test status,
+    // and pulses travel along edges the way a change propagates to dependent features.
+    world.add(orb(new THREE.IcosahedronGeometry(1.25, small ? 12 : 24)));
+    const net = new THREE.Group();
+    world.add(net);
+    const shellGeo = new THREE.IcosahedronGeometry(3.1, 1);
+    net.add(new THREE.LineSegments(new THREE.EdgesGeometry(shellGeo), additive(color, .28)));
+    const posAttr = shellGeo.getAttribute('position');
+    const verts = [];
+    for (let i = 0; i < posAttr.count; i++) {
+      const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+      if (!verts.some((u) => u.distanceTo(v) < .01)) verts.push(v);
+    }
+    const status = [color, color, color, new THREE.Color(0xffb547), new THREE.Color(0xff5d6c)];
+    const alarms = [];
+    verts.forEach((v, i) => {
+      const c2 = status[i % status.length];
+      const m = new THREE.Mesh(new THREE.SphereGeometry(.09, 12, 12), new THREE.MeshBasicMaterial({ color: c2 }));
+      m.position.copy(v);
+      const gl = glow(c2, .7, .8); gl.position.copy(v);
+      net.add(m, gl);
+      if (i % status.length === 4) alarms.push(gl);
+    });
+    const pairs = [];
+    for (let i = 0; i < verts.length; i++) {
+      for (let j = i + 1; j < verts.length; j++) if (verts[i].distanceTo(verts[j]) < 2.2) pairs.push([verts[i], verts[j]]);
+    }
+    const pulses = Array.from({ length: small ? 10 : 18 }, () => {
+      const sp = glow(light, .45, .95);
+      net.add(sp);
+      return { sp, pair: pairs[(Math.random() * pairs.length) | 0], u: Math.random(), speed: .35 + Math.random() * .4 };
+    });
+    dust(small ? 350 : 700, 4.6, 6.4, .3, light);
+    updates.push((t, dt) => {
+      net.rotation.y = t * .08;
+      net.rotation.x = Math.sin(t * .2) * .1;
+      pulses.forEach((p) => {
+        p.u += dt * p.speed;
+        if (p.u >= 1) { p.u = 0; p.pair = pairs[(Math.random() * pairs.length) | 0]; }
+        p.sp.position.lerpVectors(p.pair[0], p.pair[1], p.u);
+        p.sp.material.opacity = Math.sin(p.u * Math.PI) * .95;
+      });
+      alarms.forEach((gl) => { gl.material.opacity = .45 + .45 * Math.sin(t * 5); });
+    });
   } else {
     const crystal = orb(new THREE.OctahedronGeometry(1.8, 0));
     world.add(crystal);
@@ -153,7 +198,27 @@ function start(THREE) {
     if (!w || !h) return;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
-    camera.position.z = w / h < 1 ? 15 : 11;
+    if (canvas.dataset.bleed != null) {
+      // Full-window canvas: frame the planet from the window's shape. Park it on the right and keep the whole
+      // body (data-radius, in scene units) in view at any size; only a faint ring may run off the screen edge.
+      const RAD = Number(canvas.dataset.radius) || 3, aspect = w / h;
+      const tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+      let z, x, y = 0;
+      if (innerWidth > 1080) {
+        z = Math.max(11, RAD / (0.66 * tanH)); // body never taller than ~2/3 of the window
+        const halfW = z * tanH * aspect;
+        x = Math.max(0, Math.min(halfW - RAD, halfW * 0.46));
+      } else {
+        z = Math.max(11, (RAD * 2) / (tanH * aspect));
+        const halfW = z * tanH * aspect, halfH = z * tanH;
+        x = halfW - RAD * 1.1;
+        y = halfH * 0.3;
+      }
+      camera.position.z = z;
+      world.position.set(x, y, 0);
+    } else {
+      camera.position.z = w / h < 1 ? 15 : 11;
+    }
     camera.updateProjectionMatrix();
   };
   resize();
@@ -172,7 +237,7 @@ function start(THREE) {
     camera.position.x = ptr.sx * 1.2; camera.position.y = -ptr.sy * .8;
     camera.lookAt(0, 0, 0);
     world.rotation.y = Math.sin(t * .2) * .2;
-    updates.forEach((u) => u(t));
+    updates.forEach((u) => u(t, dt));
     renderer.render(scene, camera);
     raf = visible && !reduce ? requestAnimationFrame(frame) : 0;
   };
