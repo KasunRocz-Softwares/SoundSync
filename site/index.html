@@ -313,5 +313,23 @@
   </footer>
   <script src="main.js" defer></script>
   <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "d643285744554e93a90cdbb2d4b0c597"}'></script><!-- End Cloudflare Web Analytics -->
+  <!-- GoatCounter (https://soundsync.goatcounter.com): no cookies, no personal data. Counts visits on the live site only, plus clicks on release downloads. -->
+  <script>
+  (function () {
+    if (!/(\.github\.io|^qulaxy\.com)$/.test(location.hostname)) return;
+    document.querySelectorAll('a[href*="/releases/"]').forEach(function (a) {
+      if (a.hasAttribute('data-goatcounter-click')) return;
+      a.setAttribute('data-goatcounter-click', 'download-' + a.pathname.split('/').pop());
+      a.setAttribute('data-goatcounter-title', a.textContent.trim().slice(0, 80) || 'Download');
+    });
+    // Record the page path only, so ?ref=... links don't show up as separate pages.
+    window.goatcounter = { path: function () { return location.pathname; } };
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://gc.zgo.at/count.js';
+    s.setAttribute('data-goatcounter', 'https://soundsync.goatcounter.com/count');
+    document.body.appendChild(s);
+  })();
+  </script>
 </body>
 </html>
